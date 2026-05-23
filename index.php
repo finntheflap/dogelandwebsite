@@ -334,7 +334,7 @@ function post_card($po){
   /* Chuỗi search gộp title + content + server để JS lọc nhanh không cần round-trip. */
   $searchStr = mb_strtolower(trim(($po['title']??'').' '.preg_replace('/\s+/',' ',$po['content']??'').' '.($po['server']??'')),'UTF-8');
   return '<div class="card post" data-type="'.h($po['type']).'" data-server="'.h(strtolower((string)($po['server']??''))).'" data-search="'.h($searchStr).'">'.$img.'<div class="pb">'
-       .'<span class="ptag '.h($po['type']).'">'.$tl.'</span>'.$srv
+       .'<div class="ptag-row"><span class="ptag '.h($po['type']).'">'.$tl.'</span>'.$srv.'</div>'
        .'<h3>'.h($po['title']).'</h3>'
        .'<div class="date">'.$date.'</div>'
        .'<p>'.h($ex).'</p>'
@@ -2115,7 +2115,11 @@ footer{border-top:1px solid var(--line);margin-top:64px;padding:48px 0 30px;back
 .ptag{display:inline-flex;align-self:flex-start;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:4px 11px;border-radius:20px;color:#fff;margin-bottom:11px}
 .ptag.event{background:var(--red)} .ptag.news{background:#5b8def}
 .ptag.guide{background:var(--green)} .ptag.rules{background:#7c5cd6} .ptag.update{background:var(--diamond);color:#0a2123}
-.ptag-srv{display:inline-flex;align-items:center;font-size:.68rem;font-weight:700;letter-spacing:.3px;padding:4px 10px;border-radius:20px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line-2);margin:0 0 11px 6px;vertical-align:middle}
+.ptag-srv{display:inline-flex;align-self:flex-start;align-items:center;font-size:.68rem;font-weight:700;letter-spacing:.3px;padding:4px 10px;border-radius:20px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line-2);margin:0 0 11px 6px;vertical-align:middle}
+/* Hàng chứa ptag + ptag-srv trên thẻ post — giữ cả hai pill trên cùng 1 dòng,
+   tránh stretch full width trong flex-column parent. */
+.ptag-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:11px}
+.ptag-row .ptag,.ptag-row .ptag-srv{margin:0}
 /* ===== Filter + search bar dùng chung cho trang Sự kiện & Cẩm nang ===== */
 .postfilter{display:flex;flex-direction:column;gap:12px;margin-bottom:22px}
 .postsearch{background:var(--panel);border:1px solid var(--line-2);border-radius:12px;padding:12px 16px;color:var(--ink);font:inherit;width:100%;transition:border-color var(--t),box-shadow var(--t)}

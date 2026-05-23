@@ -305,15 +305,22 @@ function tk_admin_list(){
 function get_posts($type=null,$limit=30){
   try{ if($type){$st=db()->prepare("SELECT * FROM web_posts WHERE type=? ORDER BY pinned DESC,id DESC LIMIT $limit");$st->execute([$type]);}else{$st=db()->query("SELECT * FROM web_posts ORDER BY pinned DESC,id DESC LIMIT $limit");} return $st->fetchAll(); }catch(Exception $e){ return []; }
 }
+/* Các loại bài viết hợp lệ — dùng cho cả validate (post_save) và label hiển thị. */
+function post_type_label($t){
+  $m=['event'=>'Sự kiện','news'=>'Thông báo','guide'=>'Hướng dẫn','rules'=>'Nội quy','update'=>'Cập nhật'];
+  return $m[$t]??'Thông báo';
+}
+function post_types_allowed(){ return ['event','news','guide','rules','update']; }
 function post_card($po){
-  $tl = $po['type']==='event' ? 'Sự kiện' : 'Thông báo';
+  $tl = post_type_label($po['type']);
   $img = $po['image'] ? '<div class="img" style="background-image:url('.h($po['image']).')"></div>' : '';
   $clean = trim(preg_replace('/\s+/',' ',$po['content']));
   $ex = function_exists('mb_substr') ? mb_substr($clean,0,140,'UTF-8') : substr($clean,0,140);
   if((function_exists('mb_strlen')?mb_strlen($po['content'],'UTF-8'):strlen($po['content']))>140) $ex.='…';
   $date = $po['event_at'] ? 'Diễn ra '.date('d/m/Y',(int)($po['event_at']/1000)) : 'Đăng '.date('d/m/Y',(int)($po['created']/1000));
+  $srv = !empty($po['server']) ? '<span class="ptag-srv">🖥️ '.h($po['server']).'</span>' : '';
   return '<div class="card post">'.$img.'<div class="pb">'
-       .'<span class="ptag '.h($po['type']).'">'.$tl.'</span>'
+       .'<span class="ptag '.h($po['type']).'">'.$tl.'</span>'.$srv
        .'<h3>'.h($po['title']).'</h3>'
        .'<div class="date">'.$date.'</div>'
        .'<p>'.h($ex).'</p>'
@@ -619,6 +626,8 @@ function db(){
     event_at BIGINT NULL, author VARCHAR(64) NOT NULL DEFAULT 'Admin',
     pinned TINYINT NOT NULL DEFAULT 0, created BIGINT NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+  /* Migrate: thêm cột server (tên server liên quan — chủ yếu cho bài Cập nhật). */
+  try{ $pdo->exec("ALTER TABLE web_posts ADD COLUMN server VARCHAR(48) NOT NULL DEFAULT '' AFTER event_at"); }catch(Exception $e){}
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_auctions(
     id INT AUTO_INCREMENT PRIMARY KEY, item VARCHAR(120) NOT NULL, seller VARCHAR(64) NOT NULL,
     color VARCHAR(16) NOT NULL DEFAULT '#888888', price INT NOT NULL DEFAULT 0,
@@ -1005,16 +1014,17 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   if($act==='post_save'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
     $id=(int)($_POST['id']??0);
-    $type=in_array(($_POST['type']??''),['event','news'],true)?$_POST['type']:'news';
+    $type=in_array(($_POST['type']??''),post_types_allowed(),true)?$_POST['type']:'news';
     $title=trim($_POST['title']??''); $content=trim($_POST['content']??'');
     $image=trim($_POST['image']??''); $pinned=!empty($_POST['pinned'])?1:0;
     $event_at = !empty($_POST['event_at']) ? strtotime($_POST['event_at'])*1000 : null;
-    if($title===''||$content===''){ flash(['error','Vui lòng nhập tiêu đề và nội dung.']); redirect('admin'); }
+    $server=trim($_POST['server']??''); $server=mb_substr_safe($server,0,48);
+    if($title===''||$content===''){ flash(['error','Vui lòng nhập tiêu đề và nội dung.']); redirect('admin&tab=posts'); }
     try{
-      if($id){ db()->prepare("UPDATE web_posts SET type=?,title=?,content=?,image=?,event_at=?,pinned=? WHERE id=?")->execute([$type,$title,$content,$image,$event_at,$pinned,$id]); flash(['ok','Đã cập nhật bài viết.']); }
-      else { db()->prepare("INSERT INTO web_posts(type,title,content,image,event_at,pinned,author,created) VALUES(?,?,?,?,?,?,?,?)")->execute([$type,$title,$content,$image,$event_at,$pinned,$user,ms()]); admin_log($user,'post_create',$title); flash(['ok','Đã đăng bài viết.']); }
+      if($id){ db()->prepare("UPDATE web_posts SET type=?,title=?,content=?,image=?,event_at=?,server=?,pinned=? WHERE id=?")->execute([$type,$title,$content,$image,$event_at,$server,$pinned,$id]); flash(['ok','Đã cập nhật bài viết.']); }
+      else { db()->prepare("INSERT INTO web_posts(type,title,content,image,event_at,server,pinned,author,created) VALUES(?,?,?,?,?,?,?,?,?)")->execute([$type,$title,$content,$image,$event_at,$server,$pinned,$user,ms()]); admin_log($user,'post_create','['.$type.'] '.$title); flash(['ok','Đã đăng bài viết.']); }
     }catch(Exception $e){ flash(['error','Lỗi lưu bài viết.']); }
-    redirect('admin');
+    redirect('admin&tab=posts');
   }
   if($act==='post_delete'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
@@ -1786,7 +1796,7 @@ if(in_array($p,$NEEDS_LOGIN,true) && !$user){ flash(['error','Bạn cần đăng
    VIEW
    ========================================================================== */
 $CSRF=csrf_token();
-$nav=[['home','Trang chủ'],['events','Sự kiện'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
+$nav=[['home','Trang chủ'],['events','Sự kiện'],['guide','Hướng dẫn'],['rules','Nội quy'],['updates','Cập nhật'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
 /* Các trang con thuộc nhóm "Cửa hàng" (để highlight nav + sub-tab dùng chung) */
 $SHOP_PAGES=['shop','auction','ranks','market'];
 /* Gợi ý mã item cho ô icon (đấu giá & chợ trời) */
@@ -2085,6 +2095,8 @@ footer{border-top:1px solid var(--line);margin-top:64px;padding:48px 0 30px;back
 .post .pb{padding:24px;display:flex;flex-direction:column;flex:1}
 .ptag{display:inline-flex;align-self:flex-start;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:4px 11px;border-radius:20px;color:#fff;margin-bottom:11px}
 .ptag.event{background:var(--red)} .ptag.news{background:#5b8def}
+.ptag.guide{background:var(--green)} .ptag.rules{background:#7c5cd6} .ptag.update{background:var(--diamond);color:#0a2123}
+.ptag-srv{display:inline-flex;align-items:center;font-size:.68rem;font-weight:700;letter-spacing:.3px;padding:4px 10px;border-radius:20px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line-2);margin:0 0 11px 6px;vertical-align:middle}
 .post h3{font-size:1.22rem;font-weight:800;margin-bottom:5px;line-height:1.25}
 .post .date{color:var(--gold);font-size:.82rem;font-weight:600;margin-bottom:11px}
 .post p{color:var(--muted);font-size:.93rem;margin-bottom:14px;flex:1}
@@ -2598,6 +2610,49 @@ elseif($p==='events'){ ?>
   </div></section>
 <?php }
 
+/* ---------------- HƯỚNG DẪN ---------------- */
+elseif($p==='guide'){ ?>
+  <div class="phead"><div class="k">Hướng dẫn</div><h1>📖 Cách chơi Dogeland</h1><p>Mọi điều bạn cần biết để bắt đầu chơi và tận hưởng server.</p>
+    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bài hướng dẫn</a></div>'; ?>
+  </div>
+  <section style="padding-top:18px"><div class="wrap">
+    <?php $posts=get_posts('guide'); if(!$posts) echo '<div class="empty">Chưa có hướng dẫn nào. Admin có thể đăng bài đầu tiên từ trang Quản trị.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+  </div></section>
+<?php }
+
+/* ---------------- NỘI QUY ---------------- */
+elseif($p==='rules'){ ?>
+  <div class="phead"><div class="k">Nội quy</div><h1>📜 Nội quy server</h1><p>Đọc kỹ trước khi chơi. Vi phạm có thể bị mute, kick hoặc ban tài khoản.</p>
+    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Cập nhật nội quy</a></div>'; ?>
+  </div>
+  <section style="padding-top:18px"><div class="wrap">
+    <?php $posts=get_posts('rules'); if(!$posts) echo '<div class="empty">Chưa có nội quy nào được đăng. Admin có thể thêm từ trang Quản trị.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+  </div></section>
+<?php }
+
+/* ---------------- CẬP NHẬT (PATCH NOTES) ---------------- */
+elseif($p==='updates'){
+  $srvFilter=trim($_GET['srv']??''); $srvFilter=mb_substr_safe($srvFilter,0,48);
+  $all=get_posts('update',60);
+  // Tập hợp danh sách server xuất hiện trong các bài cập nhật (để render bộ lọc).
+  $srvs=[]; foreach($all as $po){ $s=trim((string)($po['server']??'')); if($s!=='' && !in_array($s,$srvs,true)) $srvs[]=$s; }
+  $posts = $srvFilter==='' ? $all : array_values(array_filter($all,function($po)use($srvFilter){ return strcasecmp((string)($po['server']??''),$srvFilter)===0; }));
+?>
+  <div class="phead"><div class="k">Cập nhật</div><h1>🔧 Patch Notes &amp; Changelog</h1><p>Theo dõi mọi thay đổi, vá lỗi, và nội dung mới trên từng server.</p>
+    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bản cập nhật</a></div>'; ?>
+  </div>
+  <section style="padding-top:18px"><div class="wrap">
+    <?php if($srvs){ ?>
+    <div class="shopnav" style="margin-bottom:18px">
+      <a href="?p=updates" class="<?=$srvFilter===''?'on':''?>">🌐 Tất cả</a>
+      <?php foreach($srvs as $s) echo '<a href="?p=updates&srv='.urlencode($s).'" class="'.(strcasecmp($srvFilter,$s)===0?'on':'').'">🖥️ '.h($s).'</a>'; ?>
+    </div>
+    <?php }
+      if(!$posts) echo '<div class="empty">Chưa có bản cập nhật nào'.($srvFilter!==''?' cho server <b>'.h($srvFilter).'</b>':'').'.</div>';
+      else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+  </div></section>
+<?php }
+
 /* ---------------- THÔNG TIN ---------------- */
 elseif($p==='info'){ ?>
   <div class="phead"><div class="k">Thông tin</div><h1>Thông tin Server</h1></div>
@@ -2634,9 +2689,10 @@ elseif($p==='post'){
   <section style="padding-top:46px"><div class="wrap"><div class="article">
     <?php if(!$po){ echo '<div class="empty">Bài viết không tồn tại.</div>'; }
       else {
-        $tl=$po['type']==='event'?'Sự kiện':'Thông báo';
+        $tl=post_type_label($po['type']);
         if($po['image']) echo '<div class="cover" style="background-image:url('.h($po['image']).')"></div>';
         echo '<span class="ptag '.h($po['type']).'">'.$tl.'</span>';
+        if(!empty($po['server'])) echo ' <span class="ptag-srv">🖥️ '.h($po['server']).'</span>';
         echo '<h1>'.h($po['title']).'</h1>';
         echo '<div class="date">'.($po['event_at']?'Diễn ra: '.date('d/m/Y',(int)($po['event_at']/1000)).' · ':'').'Đăng '.date('d/m/Y',(int)($po['created']/1000)).' bởi '.h($po['author']).'</div>';
         echo '<div class="body">'.nl2br(h($po['content'])).'</div>';
@@ -2740,10 +2796,21 @@ elseif($p==='admin'){
           <h3 class="ah"><?= $edit?'Sửa bài viết':'Đăng bài mới' ?></h3>
           <form method="post" action="?p=admin">
             <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="post_save"><input type="hidden" name="id" value="<?= $edit?(int)$edit['id']:0 ?>">
-            <div class="field"><label>Loại bài</label><select name="type"><option value="event"<?= ($edit&&$edit['type']==='event')?' selected':'' ?>>Sự kiện</option><option value="news"<?= (!$edit||$edit['type']==='news')?' selected':'' ?>>Thông báo</option></select></div>
+            <div class="field"><label>Loại bài</label><select name="type">
+              <?php $curT = $edit?$edit['type']:'news';
+                foreach(post_types_allowed() as $tk) echo '<option value="'.h($tk).'"'.($curT===$tk?' selected':'').'>'.h(post_type_label($tk)).'</option>'; ?>
+            </select><div class="sub2" style="margin-top:4px;font-size:.78rem">
+              <b>Sự kiện</b>: lễ hội / event giới hạn (có ngày diễn ra). <b>Thông báo</b>: tin chung. <b>Hướng dẫn</b>: cách chơi, mẹo. <b>Nội quy</b>: luật server. <b>Cập nhật</b>: patch notes / changelog (nên ghi tên server bên dưới).
+            </div></div>
             <div class="field"><label>Tiêu đề</label><input name="title" value="<?= $edit?h($edit['title']):'' ?>" required></div>
             <div class="field"><label>Ảnh bìa (URL)</label><input name="image" value="<?= $edit?h($edit['image']):'' ?>" placeholder="https://i.imgur.com/..."></div>
-            <div class="field"><label>Ngày diễn ra (sự kiện)</label><input type="date" name="event_at" value="<?= ($edit&&$edit['event_at'])?date('Y-m-d',(int)($edit['event_at']/1000)):'' ?>"></div>
+            <div class="g2">
+              <div class="field"><label>Ngày diễn ra (Sự kiện)</label><input type="date" name="event_at" value="<?= ($edit&&$edit['event_at'])?date('Y-m-d',(int)($edit['event_at']/1000)):'' ?>"></div>
+              <div class="field"><label>Server (Cập nhật / Hướng dẫn)</label>
+                <input name="server" value="<?= $edit?h($edit['server']??''):'' ?>" placeholder="VD: Survival, SDO, Lobby — để trống nếu áp dụng toàn server" list="srv-suggest">
+                <datalist id="srv-suggest"><?php foreach(($CFG['ticket_servers']??[]) as $s) echo '<option value="'.h($s).'">'; ?></datalist>
+              </div>
+            </div>
             <div class="field"><label>Nội dung</label><textarea name="content" required><?= $edit?h($edit['content']):'' ?></textarea></div>
             <label class="chk"><input type="checkbox" name="pinned" value="1"<?= ($edit&&$edit['pinned'])?' checked':'' ?>> Ghim lên đầu trang</label>
             <button class="btn btn-green btn-block" type="submit"><?= $edit?'Cập nhật':'Đăng bài' ?></button>
@@ -2754,7 +2821,9 @@ elseif($p==='admin'){
           <div class="ahd">Tất cả bài viết (<?=count($all)?>)</div>
           <div style="overflow-x:auto"><table class="tbl"><tbody>
           <?php if(!$all) echo '<tr><td class="cmid">Chưa có bài viết.</td></tr>';
-            else foreach($all as $a) echo '<tr><td><span class="ptag '.h($a['type']).'" style="margin:0 0 6px">'.($a['type']==='event'?'Sự kiện':'Thông báo').'</span><div style="font-weight:700">'.h($a['title']).'</div><div class="sub2">'.date('d/m/Y',(int)($a['created']/1000)).($a['pinned']?' · Đã ghim':'').'</div></td><td class="tr"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts&edit='.(int)$a['id'].'">Sửa</a> <form method="post" action="?p=admin" style="display:inline" onsubmit="return confirm(\'Xoá?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="post_delete"><input type="hidden" name="id" value="'.(int)$a['id'].'"><button class="btn btn-sm bdel">Xoá</button></form></td></tr>'; ?>
+            else foreach($all as $a){ $srvTag = !empty($a['server']) ? ' <span class="ptag-srv">🖥️ '.h($a['server']).'</span>' : '';
+              echo '<tr><td><span class="ptag '.h($a['type']).'" style="margin:0 0 6px">'.h(post_type_label($a['type'])).'</span>'.$srvTag.'<div style="font-weight:700;margin-top:4px">'.h($a['title']).'</div><div class="sub2">'.date('d/m/Y',(int)($a['created']/1000)).($a['pinned']?' · Đã ghim':'').'</div></td><td class="tr"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts&edit='.(int)$a['id'].'">Sửa</a> <form method="post" action="?p=admin" style="display:inline" onsubmit="return confirm(\'Xoá?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="post_delete"><input type="hidden" name="id" value="'.(int)$a['id'].'"><button class="btn btn-sm bdel">Xoá</button></form></td></tr>';
+            } ?>
           </tbody></table></div>
         </div>
       </div>
@@ -2929,7 +2998,7 @@ elseif($p==='admin'){
             <div class="field"><label>Tên rank</label><input name="name" value="<?= $er?h($er['name']):'' ?>" required></div>
             <div class="field"><label>Giá (<?=h($CFG['doge_label']??'Dogecoin')?>)</label><input name="price" type="number" min="0" value="<?= $er?(int)$er['price']:1000 ?>"></div>
             <div class="field"><label>Màu chữ</label><input name="color" type="color" value="<?= $er?h($er['color']):'#f2b631' ?>" style="height:46px;padding:4px;cursor:pointer"></div>
-            <div class="field"><label>Thứ tự</label><input name="sort" type="number" value="<?= $er?(int)$er['sort']:0 ?>"></div>
+            <div class="field"><label>Thứ tự</label><input name="sort" type="number" value="<?= $er?(int)$er['sort']:0 ?>"><div class="sub2" style="margin-top:4px;font-size:.78rem">Số càng nhỏ càng hiện <b>trước</b> trong trang Cửa hàng (sắp xếp <code>ORDER BY sort,id</code>). VD: VIP=1, VIP+=2, MVP=3. Bằng nhau thì rank tạo trước được hiện trước.</div></div>
             <div class="field"><label>Kích hoạt</label><select name="active"><option value="1"<?= !$er||$er['active']?' selected':'' ?>>Có</option><option value="0"<?= $er&&!$er['active']?' selected':'' ?>>Tạm ẩn</option></select></div>
           </div>
           <div class="field"><label>Mô tả / Quyền lợi (mỗi dòng 1 dòng hiển thị)</label><textarea name="description" rows="4" placeholder="Tiền tố [VIP] màu xanh&#10;/kit vip mỗi ngày&#10;+10% Dogecoin khi farm"><?= $er?h($er['description']):'' ?></textarea></div>

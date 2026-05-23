@@ -650,6 +650,7 @@ function db(){
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN rank_name VARCHAR(48) NOT NULL DEFAULT '' AFTER last_login"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN suffix VARCHAR(48) NOT NULL DEFAULT '' AFTER rank_name"); }catch(Exception $e){}
+  try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN rank_color VARCHAR(16) NOT NULL DEFAULT '' AFTER suffix"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN banned TINYINT NOT NULL DEFAULT 0"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN ban_reason VARCHAR(190) NOT NULL DEFAULT ''"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN banned_by VARCHAR(64) NOT NULL DEFAULT ''"); }catch(Exception $e){}
@@ -1298,6 +1299,9 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       if(!doge_take($user,(int)$r['price'])){ flash(['error','Không đủ '.($CFG['doge_label']??'Dogecoin').' (cần '.doge_fmt((int)$r['price']).').']); redirect('ranks&scope='.$r['scope']); }
       else{
         db()->prepare("INSERT INTO web_rank_purchases(username,rank_id,rank_name,scope,price,created) VALUES(?,?,?,?,?,?)")->execute([$user,$id,$r['name'],$r['scope'],(int)$r['price'],ms()]);
+        // Áp rank + màu lên hồ sơ ngay (đảm bảo có wallet row trước).
+        wallet($user);
+        db()->prepare("UPDATE web_wallet SET rank_name=?, rank_color=? WHERE username=?")->execute([$r['name'],(string)($r['color']??''),$user]);
         $uuid=pp_key($user);
         foreach(preg_split('/\r\n|\r|\n/',(string)$r['commands']) as $line){ $line=trim($line); if($line==='') continue;
           $cmd=str_replace(['{player}','{user}','{uuid}','{rank}'],[$user,$user,$uuid,$r['name']],$line);
@@ -1877,10 +1881,12 @@ main{animation:pageIn .45s ease}
 /* hero */
 .hero{padding:60px 0 34px}
 .hgrid{display:grid;grid-template-columns:1.08fr .92fr;gap:44px;align-items:center}
+.lblive{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:.78rem;font-weight:700;margin-left:8px}
+.lblive::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(87,182,90,.6);animation:pulse 2s infinite}
 .badge{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.06);border:1px solid var(--line-2);color:#bfe6c0;font-weight:600;font-size:.83rem;padding:7px 15px;border-radius:30px;margin-bottom:22px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(87,182,90,.6);animation:pulse 2s infinite}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(87,182,90,0)}}
-.hero h1{font-size:clamp(2.6rem,6vw,4.4rem);font-weight:800;line-height:1.02;letter-spacing:-1px}
+.hero h1{font-size:clamp(1.9rem,7vw,4.4rem);font-weight:800;line-height:1.05;letter-spacing:-1px;word-break:break-word}
 .hero h1 .g{background:linear-gradient(180deg,#ffe39a,var(--gold-d));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero .lead{color:var(--muted);font-size:1.1rem;max-width:440px;margin:18px 0 24px}
 .ipbar{display:flex;align-items:center;background:rgba(0,0,0,.4);border:1px solid var(--line-2);border-radius:14px;padding:8px 8px 8px 18px;max-width:420px;margin-bottom:24px;transition:border-color var(--t)}
@@ -2396,6 +2402,12 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
   .pskin img{width:120px;height:auto}
   .udd{width:min(280px,calc(100vw - 24px))}
   .fgrid{grid-template-columns:1fr;gap:18px}
+  /* Hero gọn lại trên điện thoại để không tràn / không quá to */
+  .hero{padding:34px 0 22px}
+  .hero .lead{font-size:.98rem}
+  .ipbar{padding:10px 10px 10px 14px}
+  .ipbar .v{font-size:1rem}
+  .ipbar .copy{padding:9px 14px;font-size:.82rem}
 }
 /* Chặn scroll ngang ngoài ý muốn trên mobile */
 html,body{overflow-x:hidden}
@@ -3153,17 +3165,21 @@ elseif($p==='top'){
       }
     }catch(Exception $e){}
   }
+  // AJAX endpoint cho real-time refresh: trả về JSON thô để JS dựng lại bảng.
+  if(!empty($_GET['ajax'])){
+    json_out(['cat'=>$cat,'unit'=>$unit,'isDoge'=>$isDoge,'rows'=>$rows,'myRank'=>$myRank,'myVal'=>$myVal,'user'=>$user,'doge_symbol'=>$CFG['doge_symbol']??'Ð']);
+  }
 ?>
-  <div class="phead"><div class="k">Bảng xếp hạng</div><h1>Top người chơi</h1><p>Vinh danh những người chơi tiêu nhiều <?=h($CFG['doge_label']??'Dogecoin')?> nhất Dogeland Network.</p></div>
+  <div class="phead"><div class="k">Bảng xếp hạng</div><h1>Top người chơi</h1><p>Vinh danh những người chơi tiêu nhiều <?=h($CFG['doge_label']??'Dogecoin')?> nhất Dogeland Network. <span class="lblive">● đang cập nhật trực tiếp</span></p></div>
   <section style="padding-top:14px"><div class="wrap" style="max-width:780px">
     <div class="tabs"><?php foreach($cats as $c) echo '<a class="tab'.($cat===$c[0]?' on':'').'" href="?p=top&cat='.$c[0].'">'.h($c[1]).'</a>'; ?></div>
     <?php if($user){
       if($myRank>0) echo '<div class="myrank"><span class="badge">#'.$myRank.'</span><div class="who"><b>'.h($user).'</b><div>Bạn đang ở hạng #'.$myRank.' với '.($isDoge?doge_short($myVal):number_format($myVal,0,',','.').' '.$unit).'</div></div><img class="lbav" src="'.h($sapi).'/avatar/'.urlencode($user).'/40" onerror="this.src=\'?img=doge\'" alt=""></div>';
       else echo '<div class="myrank"><span class="badge">—</span><div class="who"><b>'.h($user).'</b><div>Bạn chưa có mặt trong bảng này. Hãy tham gia để ghi tên mình!</div></div></div>';
     } ?>
-    <div class="card" style="padding:0;overflow:hidden">
-      <?php if(!$rows) echo '<div class="empty" style="border:0">Chưa có dữ liệu.</div>';
-        else { echo '<div class="lb">'; $rk=0; foreach($rows as $r){ $rk++; $medal=$rk<=3?'m'.$rk:'';
+    <div class="card" id="lbcard" style="padding:0;overflow:hidden" data-cat="<?=h($cat)?>">
+      <?php if(!$rows) echo '<div class="empty" id="lbbody" style="border:0">Chưa có dữ liệu.</div>';
+        else { echo '<div class="lb" id="lbbody">'; $rk=0; foreach($rows as $r){ $rk++; $medal=$rk<=3?'m'.$rk:'';
           $mine = $user && strtolower($r['name'])===strtolower($user);
           $val = $isDoge ? ('<span class="dsym">Ð</span>'.number_format($r['val'],0,',','.')) : (number_format($r['val'],0,',','.').' <small>'.$unit.'</small>');
           echo '<div class="lbrow"'.($mine?' style="background:rgba(242,182,49,.07)"':'').'><span class="lbrk '.$medal.'">'.$rk.'</span>'
@@ -3173,6 +3189,48 @@ elseif($p==='top'){
         } echo '</div>'; } ?>
     </div>
   </div></section>
+  <script>
+  (function(){
+    const SAPI=<?=json_encode($sapi)?>, ME=<?=json_encode($user)?>;
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+    function render(d){
+      const card=document.getElementById('lbcard'); if(!card) return;
+      const rows=d.rows||[];
+      if(!rows.length){ card.innerHTML='<div class="empty" id="lbbody" style="border:0">Chưa có dữ liệu.</div>'; return; }
+      let h='<div class="lb" id="lbbody">';
+      rows.forEach((r,i)=>{
+        const rk=i+1, medal=rk<=3?('m'+rk):'';
+        const mine = ME && String(r.name).toLowerCase()===String(ME).toLowerCase();
+        const val = d.isDoge
+          ? ('<span class="dsym">'+esc(d.doge_symbol||'Ð')+'</span>'+Number(r.val).toLocaleString('vi-VN'))
+          : (Number(r.val).toLocaleString('vi-VN')+' <small>'+esc(d.unit)+'</small>');
+        h+='<div class="lbrow"'+(mine?' style="background:rgba(242,182,49,.07)"':'')+
+          '><span class="lbrk '+medal+'">'+rk+'</span>'+
+          '<img class="lbav" src="'+SAPI+'/avatar/'+encodeURIComponent(r.name)+'/34" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'+
+          '<span class="lbn">'+esc(r.name)+(mine?' <small style="color:var(--gold)">(bạn)</small>':'')+'</span>'+
+          '<span class="lbv">'+val+'</span></div>';
+      });
+      h+='</div>'; card.innerHTML=h;
+      // Cập nhật "myrank" pill bên trên
+      const mr=document.querySelector('.myrank');
+      if(mr && ME){
+        if(d.myRank>0){
+          const valStr=d.isDoge ? (esc(d.doge_symbol||'Ð')+Number(d.myVal).toLocaleString('vi-VN'))
+                                : (Number(d.myVal).toLocaleString('vi-VN')+' '+esc(d.unit));
+          mr.querySelector('.badge').textContent='#'+d.myRank;
+          const who=mr.querySelector('.who div'); if(who) who.textContent='Bạn đang ở hạng #'+d.myRank+' với '+valStr.replace(/<[^>]+>/g,'');
+        }
+      }
+    }
+    function tick(){
+      const cat=document.getElementById('lbcard')?.dataset.cat||'doge_spent';
+      fetch('?p=top&ajax=1&cat='+encodeURIComponent(cat),{credentials:'same-origin'})
+        .then(r=>r.json()).then(render).catch(()=>{});
+    }
+    // Bắt đầu polling. 12 giây = đủ nhanh, không quá tốn DB.
+    setInterval(tick, 12000);
+  })();
+  </script>
 <?php }
 
 /* ---------------- HỒ SƠ CÁ NHÂN ---------------- */
@@ -3182,7 +3240,7 @@ elseif($p==='profile'){
   try{ $myRank=db()->prepare("SELECT COUNT(*) FROM web_wallet WHERE doge_spent>?"); $myRank->execute([$spent]); $myRank=$spent>0?((int)$myRank->fetchColumn()+1):0; }catch(Exception $e){ $myRank=0; }
   $regdate=0; $lastlogin=0;
   try{ $st=db()->prepare("SELECT email,regdate,lastlogin FROM `".$CFG['authme_table']."` WHERE LOWER(username)=?"); $st->execute([strtolower($user)]); $r=$st->fetch(); $email=$r['email']??''; $regdate=(int)($r['regdate']??0); $lastlogin=(int)($r['lastlogin']??0); }catch(Exception $e){}
-  $rank=trim((string)($w['rank_name']??'')); $suffix=trim((string)($w['suffix']??''));
+  $rank=trim((string)($w['rank_name']??'')); $suffix=trim((string)($w['suffix']??'')); $rankColor=trim((string)($w['rank_color']??''));
   $ageDays = $regdate>0 ? max(1,(int)floor((ms()-$regdate)/86400000)) : 0;
   $inv=[]; try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,id"); $is->execute([$user]); foreach($is->fetchAll() as $row) $inv[$row['mode']][]=$row; }catch(Exception $e){}
   $modes=$CFG['modes']; $first=array_key_first($modes);
@@ -3196,7 +3254,7 @@ elseif($p==='profile'){
           <div class="pstat"><span><?=h($CFG['doge_label']??'Dogecoin')?></span><b class="dogechip"><?=number_format($bal,0,',','.')?></b></div>
           <div class="pstat"><span>Đã tiêu</span><b style="color:#f7c948"><?=number_format($spent,0,',','.')?></b></div>
           <div class="pstat"><span>Hạng tiêu xài</span><b><?= $myRank>0?('#'.$myRank):'—' ?></b></div>
-          <div class="pstat"><span>Rank in-game</span><b><?= $rank!=='' ? h($rank).($suffix!==''?' <span class="sub2" style="font-weight:600">'.h($suffix).'</span>':'') : '<span class="sub2" style="font-weight:600">Chưa có</span>' ?></b></div>
+          <div class="pstat"><span>Rank in-game</span><b<?= $rank!=='' && $rankColor!=='' ? ' style="color:'.h($rankColor).'"' : '' ?>><?= $rank!=='' ? h($rank).($suffix!==''?' <span class="sub2" style="font-weight:600;color:var(--muted)">'.h($suffix).'</span>':'') : '<span class="sub2" style="font-weight:600">Chưa có</span>' ?></b></div>
           <div class="pstat"><span>Ngày tham gia</span><b><?= $regdate>0 ? date('d/m/Y',(int)($regdate/1000)).' <span class="sub2" style="font-weight:600">('.$ageDays.' ngày)</span>' : '—' ?></b></div>
           <div class="pstat"><span>Đăng nhập gần nhất</span><b><?= $lastlogin>0 ? date('d/m/Y H:i',(int)($lastlogin/1000)) : '—' ?></b></div>
           <div class="pstat"><span>Số lần đăng nhập</span><b><?=(int)$w['logins']?></b></div>

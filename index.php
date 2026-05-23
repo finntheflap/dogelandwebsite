@@ -1859,6 +1859,16 @@ header.sc{background:rgba(14,16,19,.82);backdrop-filter:blur(14px);border-bottom
 .uchip{display:flex;align-items:center;gap:9px;font-weight:700;background:rgba(255,255,255,.06);border:1px solid var(--line-2);padding:6px 12px 6px 8px;border-radius:30px}
 .uchip img{width:28px;height:28px;object-fit:contain}
 .burger{display:none;background:rgba(255,255,255,.06);border:1px solid var(--line-2);color:var(--ink);width:46px;height:44px;border-radius:11px;font-size:1.2rem;cursor:pointer}
+/* ===== Social icons (navbar + mobile menu) ===== */
+.nsoc{display:flex;gap:6px;flex:none}
+.nsoc-a{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;color:var(--muted);background:rgba(255,255,255,.04);border:1px solid var(--line);transition:color var(--t),background var(--t),border-color var(--t),transform var(--t)}
+.nsoc-a:hover{color:var(--ink);background:rgba(255,255,255,.10);transform:translateY(-1px)}
+.nsoc-a.discord:hover{color:#fff;background:rgba(88,101,242,.20);border-color:rgba(88,101,242,.5)}
+.nsoc-a.facebook:hover{color:#fff;background:rgba(24,119,242,.20);border-color:rgba(24,119,242,.5)}
+.nsoc-a.youtube:hover{color:#fff;background:rgba(255,0,51,.18);border-color:rgba(255,0,51,.5)}
+.nsoc-a.tiktok:hover{color:#fff;background:rgba(0,242,234,.18);border-color:rgba(0,242,234,.5)}
+.mm-soc{display:flex;gap:10px;justify-content:center;padding:12px 0 6px;margin-top:6px;border-top:1px solid var(--line)}
+.mm-soc .nsoc-a{width:46px;height:46px;border-radius:12px}
 
 /* page anim */
 main{animation:pageIn .45s ease}
@@ -2356,10 +2366,14 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
 .mm a{color:var(--ink);text-decoration:none;font-weight:600;padding:11px 12px;border-radius:10px}
 .mm a:hover{background:rgba(255,255,255,.06)}
 @media(max-width:920px){
-  .links{display:none}.burger{display:grid;place-items:center;margin-left:auto}.ncta{margin-left:0}.ncta .btn-ghost{display:none}
+  .links{display:none}.nsoc{display:none}.burger{display:grid;place-items:center;margin-left:auto}.ncta{margin-left:0}.ncta .btn-ghost{display:none}
   .hgrid{grid-template-columns:1fr}.hart{order:-1}.hart .pic,.orb{width:280px;height:280px}
   .stats{grid-template-columns:repeat(2,1fr)}.about{grid-template-columns:1fr;text-align:center}.about .chips{justify-content:center}
   .grid3,.grid4{grid-template-columns:1fr}.mm.on{display:flex}.fgrid{grid-template-columns:1fr 1fr}
+  .admin-grid{grid-template-columns:1fr;gap:16px}
+  .shubgrid{grid-template-columns:1fr;gap:14px}
+  .pstat{flex-wrap:wrap;gap:4px 12px}
+  .pstat>b{text-align:right;min-width:0;overflow-wrap:anywhere}
 }
 @media(min-width:560px){.grid4{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:920px){.grid4{grid-template-columns:repeat(4,1fr)}}
@@ -2376,7 +2390,15 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
   .uchip .un,.uchip .car{display:none}   /* chỉ còn avatar; bấm để mở menu */
   .nbell{width:38px;height:38px}
   .burger{width:40px;height:40px}
+  /* Giảm padding card trên điện thoại — inline style trên một số card cần !important */
+  .card{padding:16px!important}
+  .pstat{font-size:.9rem;padding:9px 0}
+  .pskin img{width:120px;height:auto}
+  .udd{width:min(280px,calc(100vw - 24px))}
+  .fgrid{grid-template-columns:1fr;gap:18px}
 }
+/* Chặn scroll ngang ngoài ý muốn trên mobile */
+html,body{overflow-x:hidden}
 
 /* ===== Chuông thông báo ===== */
 .ndrop{position:relative;flex:none}
@@ -2450,6 +2472,9 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
       <?php foreach($nav as $n){ $act_on = ($p===$n[0]) || ($n[0]==='shop' && in_array($p,$SHOP_PAGES,true)); $cls=($act_on?' class="on"':''); echo '<a href="?p='.$n[0].'"'.$cls.'>'.$n[1].'</a>'; } ?>
     </div>
     <div class="ncta">
+      <div class="nsoc">
+        <?php foreach(($CFG['socials']??[]) as $k=>$u){ if(!$u) continue; echo '<a class="nsoc-a '.h($k).'" href="'.h($u).'" target="_blank" rel="noopener" aria-label="'.h($k).'">'.ic($k).'</a>'; } ?>
+      </div>
       <?php if($user){ $w=wallet($user); $av=$CFG['skin_api'].'/avatar/'.urlencode($user).'/'; ?>
         <div class="ndrop" id="ndrop">
           <button class="nbell" id="nbell" type="button" aria-label="Thông báo" onclick="toggleNotif()">
@@ -2497,6 +2522,9 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
     <?php foreach($nav as $n) echo '<a href="?p='.$n[0].'">'.$n[1].'</a>'; ?>
     <a href="?p=info">Thông tin</a>
     <?php if($user){ echo '<a href="?p=profile">Hồ sơ ('.h($user).')</a><a href="?p=logout">Đăng xuất</a>'; } else { echo '<a href="?p=login">Đăng nhập</a><a href="?p=register">Đăng ký</a>'; } ?>
+    <div class="mm-soc">
+      <?php foreach(($CFG['socials']??[]) as $k=>$u){ if(!$u) continue; echo '<a class="nsoc-a '.h($k).'" href="'.h($u).'" target="_blank" rel="noopener" aria-label="'.h($k).'">'.ic($k).'</a>'; } ?>
+    </div>
   </div>
 </header>
 

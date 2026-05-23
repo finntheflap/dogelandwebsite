@@ -3152,7 +3152,10 @@ elseif($p==='profile'){
   $w=wallet($user); $vr=verify_row($user); $email=''; $av=$CFG['skin_api'].'/avatar/'.urlencode($user).'/';
   $bal=doge_balance($user); $spent=(int)($w['doge_spent']??0);
   try{ $myRank=db()->prepare("SELECT COUNT(*) FROM web_wallet WHERE doge_spent>?"); $myRank->execute([$spent]); $myRank=$spent>0?((int)$myRank->fetchColumn()+1):0; }catch(Exception $e){ $myRank=0; }
-  try{ $st=db()->prepare("SELECT email FROM `".$CFG['authme_table']."` WHERE LOWER(username)=?"); $st->execute([strtolower($user)]); $r=$st->fetch(); $email=$r['email']??''; }catch(Exception $e){}
+  $regdate=0; $lastlogin=0;
+  try{ $st=db()->prepare("SELECT email,regdate,lastlogin FROM `".$CFG['authme_table']."` WHERE LOWER(username)=?"); $st->execute([strtolower($user)]); $r=$st->fetch(); $email=$r['email']??''; $regdate=(int)($r['regdate']??0); $lastlogin=(int)($r['lastlogin']??0); }catch(Exception $e){}
+  $rank=trim((string)($w['rank_name']??'')); $suffix=trim((string)($w['suffix']??''));
+  $ageDays = $regdate>0 ? max(1,(int)floor((ms()-$regdate)/86400000)) : 0;
   $inv=[]; try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,id"); $is->execute([$user]); foreach($is->fetchAll() as $row) $inv[$row['mode']][]=$row; }catch(Exception $e){}
   $modes=$CFG['modes']; $first=array_key_first($modes);
 ?>
@@ -3165,6 +3168,9 @@ elseif($p==='profile'){
           <div class="pstat"><span><?=h($CFG['doge_label']??'Dogecoin')?></span><b class="dogechip"><?=number_format($bal,0,',','.')?></b></div>
           <div class="pstat"><span>Đã tiêu</span><b style="color:#f7c948"><?=number_format($spent,0,',','.')?></b></div>
           <div class="pstat"><span>Hạng tiêu xài</span><b><?= $myRank>0?('#'.$myRank):'—' ?></b></div>
+          <div class="pstat"><span>Rank in-game</span><b><?= $rank!=='' ? h($rank).($suffix!==''?' <span class="sub2" style="font-weight:600">'.h($suffix).'</span>':'') : '<span class="sub2" style="font-weight:600">Chưa có</span>' ?></b></div>
+          <div class="pstat"><span>Ngày tham gia</span><b><?= $regdate>0 ? date('d/m/Y',(int)($regdate/1000)).' <span class="sub2" style="font-weight:600">('.$ageDays.' ngày)</span>' : '—' ?></b></div>
+          <div class="pstat"><span>Đăng nhập gần nhất</span><b><?= $lastlogin>0 ? date('d/m/Y H:i',(int)($lastlogin/1000)) : '—' ?></b></div>
           <div class="pstat"><span>Số lần đăng nhập</span><b><?=(int)$w['logins']?></b></div>
         </div>
         <form method="post" action="?p=profile" style="display:flex;gap:8px;margin-top:16px">

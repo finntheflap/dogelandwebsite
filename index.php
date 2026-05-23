@@ -1891,12 +1891,15 @@ main{animation:pageIn .45s ease}
 /* hero */
 .hero{padding:60px 0 34px}
 .hgrid{display:grid;grid-template-columns:1.08fr .92fr;gap:44px;align-items:center}
+/* Cho phép grid item co lại — nếu không, một từ dài (như "DOGELAND") sẽ ép
+   cột rộng hơn track và tràn ra viewport. */
+.hgrid>*{min-width:0}
 .lblive{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:.78rem;font-weight:700;margin-left:8px}
 .lblive::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(87,182,90,.6);animation:pulse 2s infinite}
 .badge{display:inline-flex;align-items:center;gap:9px;background:rgba(255,255,255,.06);border:1px solid var(--line-2);color:#bfe6c0;font-weight:600;font-size:.83rem;padding:7px 15px;border-radius:30px;margin-bottom:22px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(87,182,90,.6);animation:pulse 2s infinite}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(87,182,90,0)}}
-.hero h1{font-size:clamp(1.9rem,7vw,4.4rem);font-weight:800;line-height:1.05;letter-spacing:-1px;word-break:break-word}
+.hero h1{font-size:clamp(1.7rem,5vw,4rem);font-weight:800;line-height:1.05;letter-spacing:-1px;overflow-wrap:break-word;min-width:0;max-width:100%}
 .hero h1 .g{background:linear-gradient(180deg,#ffe39a,var(--gold-d));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero .lead{color:var(--muted);font-size:1.1rem;max-width:440px;margin:18px 0 24px}
 .ipbar{display:flex;align-items:center;background:rgba(0,0,0,.4);border:1px solid var(--line-2);border-radius:14px;padding:8px 8px 8px 18px;max-width:420px;margin-bottom:24px;transition:border-color var(--t)}

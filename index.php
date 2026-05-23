@@ -303,11 +303,23 @@ function tk_admin_list(){
   catch(Exception $e){ return []; }
 }
 function get_posts($type=null,$limit=30){
-  try{ if($type){$st=db()->prepare("SELECT * FROM web_posts WHERE type=? ORDER BY pinned DESC,id DESC LIMIT $limit");$st->execute([$type]);}else{$st=db()->query("SELECT * FROM web_posts ORDER BY pinned DESC,id DESC LIMIT $limit");} return $st->fetchAll(); }catch(Exception $e){ return []; }
+  try{
+    if(is_array($type) && $type){
+      $ph = implode(',', array_fill(0, count($type), '?'));
+      $st=db()->prepare("SELECT * FROM web_posts WHERE type IN ($ph) ORDER BY pinned DESC,id DESC LIMIT $limit");
+      $st->execute(array_values($type));
+    } elseif($type){
+      $st=db()->prepare("SELECT * FROM web_posts WHERE type=? ORDER BY pinned DESC,id DESC LIMIT $limit");
+      $st->execute([$type]);
+    } else {
+      $st=db()->query("SELECT * FROM web_posts ORDER BY pinned DESC,id DESC LIMIT $limit");
+    }
+    return $st->fetchAll();
+  }catch(Exception $e){ return []; }
 }
 /* Các loại bài viết hợp lệ — dùng cho cả validate (post_save) và label hiển thị. */
 function post_type_label($t){
-  $m=['event'=>'Sự kiện','news'=>'Thông báo','guide'=>'Hướng dẫn','rules'=>'Nội quy','update'=>'Cập nhật'];
+  $m=['event'=>'Sự kiện','news'=>'Thông báo','guide'=>'Cẩm nang','rules'=>'Nội quy','update'=>'Cập nhật'];
   return $m[$t]??'Thông báo';
 }
 function post_types_allowed(){ return ['event','news','guide','rules','update']; }
@@ -319,7 +331,9 @@ function post_card($po){
   if((function_exists('mb_strlen')?mb_strlen($po['content'],'UTF-8'):strlen($po['content']))>140) $ex.='…';
   $date = $po['event_at'] ? 'Diễn ra '.date('d/m/Y',(int)($po['event_at']/1000)) : 'Đăng '.date('d/m/Y',(int)($po['created']/1000));
   $srv = !empty($po['server']) ? '<span class="ptag-srv">🖥️ '.h($po['server']).'</span>' : '';
-  return '<div class="card post">'.$img.'<div class="pb">'
+  /* Chuỗi search gộp title + content + server để JS lọc nhanh không cần round-trip. */
+  $searchStr = mb_strtolower(trim(($po['title']??'').' '.preg_replace('/\s+/',' ',$po['content']??'').' '.($po['server']??'')),'UTF-8');
+  return '<div class="card post" data-type="'.h($po['type']).'" data-server="'.h(strtolower((string)($po['server']??''))).'" data-search="'.h($searchStr).'">'.$img.'<div class="pb">'
        .'<span class="ptag '.h($po['type']).'">'.$tl.'</span>'.$srv
        .'<h3>'.h($po['title']).'</h3>'
        .'<div class="date">'.$date.'</div>'
@@ -1773,6 +1787,8 @@ if($p==='verify'){
 }
 
 if($p==='logout'){ session_destroy(); redirect('home'); }
+/* ?p=updates đã gộp vào ?p=events. Redirect để link cũ không vỡ. */
+if($p==='updates'){ redirect('events'); }
 
 /* GET: Discord OAuth callback */
 if($p==='discord_cb' && $user && isset($_GET['code']) && $CFG['discord_client_id']){
@@ -1796,7 +1812,7 @@ if(in_array($p,$NEEDS_LOGIN,true) && !$user){ flash(['error','Bạn cần đăng
    VIEW
    ========================================================================== */
 $CSRF=csrf_token();
-$nav=[['home','Trang chủ'],['events','Sự kiện'],['guide','Hướng dẫn'],['rules','Nội quy'],['updates','Cập nhật'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
+$nav=[['home','Trang chủ'],['events','Sự kiện & Cập nhật'],['guide','Cẩm nang'],['rules','Nội quy'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
 /* Các trang con thuộc nhóm "Cửa hàng" (để highlight nav + sub-tab dùng chung) */
 $SHOP_PAGES=['shop','auction','ranks','market'];
 /* Gợi ý mã item cho ô icon (đấu giá & chợ trời) */
@@ -2100,6 +2116,14 @@ footer{border-top:1px solid var(--line);margin-top:64px;padding:48px 0 30px;back
 .ptag.event{background:var(--red)} .ptag.news{background:#5b8def}
 .ptag.guide{background:var(--green)} .ptag.rules{background:#7c5cd6} .ptag.update{background:var(--diamond);color:#0a2123}
 .ptag-srv{display:inline-flex;align-items:center;font-size:.68rem;font-weight:700;letter-spacing:.3px;padding:4px 10px;border-radius:20px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line-2);margin:0 0 11px 6px;vertical-align:middle}
+/* ===== Filter + search bar dùng chung cho trang Sự kiện & Cẩm nang ===== */
+.postfilter{display:flex;flex-direction:column;gap:12px;margin-bottom:22px}
+.postsearch{background:var(--panel);border:1px solid var(--line-2);border-radius:12px;padding:12px 16px;color:var(--ink);font:inherit;width:100%;transition:border-color var(--t),box-shadow var(--t)}
+.postsearch:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(87,182,90,.16)}
+.postchips{display:flex;gap:8px;flex-wrap:wrap}
+.postchips .chip{text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;font-weight:700;font-size:.85rem;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--line-2);transition:all var(--t);cursor:pointer}
+.postchips .chip:hover{color:var(--ink);background:rgba(255,255,255,.10)}
+.postchips .chip.on{color:#1a1208;background:linear-gradient(180deg,#ffd35a,var(--gold-d));border-color:var(--gold-d)}
 .post h3{font-size:1.22rem;font-weight:800;margin-bottom:5px;line-height:1.25}
 .post .date{color:var(--gold);font-size:.82rem;font-weight:600;margin-bottom:11px}
 .post p{color:var(--muted);font-size:.93rem;margin-bottom:14px;flex:1}
@@ -2591,8 +2615,8 @@ if($p==='home'){ ?>
   </section>
 
   <section><div class="wrap">
-    <div class="shead"><div class="k">Bảng tin</div><h2>Sự kiện &amp; Thông báo</h2><p>Tin tức, sự kiện và cập nhật mới nhất từ Dogeland Network.</p></div>
-    <?php $posts=get_posts(); if(!$posts) echo '<div class="empty">Chưa có bài viết nào.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+    <div class="shead"><div class="k">Bảng tin</div><h2>Sự kiện &amp; Cập nhật</h2><p>Tin tức, sự kiện sắp tới và bản cập nhật mới nhất từ Dogeland Network.</p></div>
+    <?php $posts=get_posts(['event','update','news'],12); if(!$posts) echo '<div class="empty">Chưa có bài viết nào.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; echo '<div style="text-align:center;margin-top:22px"><a class="btn btn-ghost" href="?p=events">Xem tất cả →</a></div>'; } ?>
   </div></section>
 
   <div class="band">
@@ -2602,22 +2626,85 @@ if($p==='home'){ ?>
   </div>
 <?php }
 
-/* ---------------- SỰ KIỆN (feed lọc sự kiện) ---------------- */
-elseif($p==='events'){ ?>
-  <div class="phead"><div class="k">Sự kiện</div><h1>Sự kiện &amp; Tin tức</h1><p>Tất cả sự kiện đang và sắp diễn ra trên server.</p></div>
-  <section style="padding-top:18px"><div class="wrap">
-    <?php $posts=get_posts('event'); if(!$posts) echo '<div class="empty">Chưa có sự kiện nào.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
-  </div></section>
-<?php }
-
-/* ---------------- HƯỚNG DẪN ---------------- */
-elseif($p==='guide'){ ?>
-  <div class="phead"><div class="k">Hướng dẫn</div><h1>📖 Cách chơi Dogeland</h1><p>Mọi điều bạn cần biết để bắt đầu chơi và tận hưởng server.</p>
-    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bài hướng dẫn</a></div>'; ?>
+/* ---------------- SỰ KIỆN & CẬP NHẬT (gộp 2 loại bài) ---------------- */
+elseif($p==='events'){
+  $posts = get_posts(['event','update'], 80);
+  // Tập hợp danh sách server xuất hiện trong các bài cập nhật để render chip lọc.
+  $srvs=[]; foreach($posts as $po){ if($po['type']==='update' && !empty($po['server']) && !in_array($po['server'],$srvs,true)) $srvs[]=$po['server']; }
+?>
+  <div class="phead"><div class="k">Bảng tin</div><h1>🎉 Sự kiện &amp; Cập nhật</h1><p>Tin tức, sự kiện sắp tới và bản cập nhật mới nhất trên server.</p>
+    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bài mới</a></div>'; ?>
   </div>
   <section style="padding-top:18px"><div class="wrap">
-    <?php $posts=get_posts('guide'); if(!$posts) echo '<div class="empty">Chưa có hướng dẫn nào. Admin có thể đăng bài đầu tiên từ trang Quản trị.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+    <div class="postfilter">
+      <input type="search" class="postsearch" placeholder="🔍 Tìm bài viết (tiêu đề, nội dung, server)…" oninput="filterPosts()">
+      <div class="postchips">
+        <a href="#" class="chip on" data-f="" onclick="setPostFilter(event,'')">🌐 Tất cả</a>
+        <a href="#" class="chip" data-f="t:event" onclick="setPostFilter(event,'t:event')">🎉 Sự kiện</a>
+        <a href="#" class="chip" data-f="t:update" onclick="setPostFilter(event,'t:update')">🔧 Cập nhật</a>
+        <?php foreach($srvs as $s) echo '<a href="#" class="chip" data-f="s:'.h(strtolower($s)).'" onclick="setPostFilter(event,\'s:'.h(strtolower($s)).'\')">🖥️ '.h($s).'</a>'; ?>
+      </div>
+    </div>
+    <?php if(!$posts) echo '<div class="empty">Chưa có bài viết nào.</div>';
+      else { echo '<div class="feed" id="postFeed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+    <div class="empty" id="postNoMatch" style="display:none;margin-top:18px">Không tìm thấy bài viết phù hợp với bộ lọc.</div>
   </div></section>
+  <script>
+  let postFilter = '';
+  function setPostFilter(ev, f){ ev.preventDefault();
+    postFilter = f;
+    document.querySelectorAll('.postchips .chip').forEach(c=>c.classList.toggle('on', c.dataset.f===f));
+    filterPosts();
+  }
+  function filterPosts(){
+    const q = (document.querySelector('.postsearch')?.value||'').toLowerCase().trim();
+    let shown = 0, total = 0;
+    document.querySelectorAll('#postFeed > .post').forEach(p=>{
+      total++;
+      const t = p.dataset.type||'', s = p.dataset.server||'', text = p.dataset.search||'';
+      let fOk = true;
+      if(postFilter.startsWith('t:')) fOk = (t === postFilter.slice(2));
+      else if(postFilter.startsWith('s:')) fOk = (s === postFilter.slice(2));
+      const qOk = !q || text.includes(q);
+      const show = fOk && qOk;
+      p.style.display = show ? '' : 'none';
+      if(show) shown++;
+    });
+    const nm = document.getElementById('postNoMatch');
+    if(nm) nm.style.display = (total>0 && shown===0) ? '' : 'none';
+  }
+  </script>
+<?php }
+
+/* ---------------- CẨM NANG (trước đây: Hướng dẫn) ---------------- */
+elseif($p==='guide'){ ?>
+  <div class="phead"><div class="k">Cẩm nang</div><h1>📖 Cẩm nang Dogeland</h1><p>Cách chơi, mẹo và mọi thứ bạn cần biết để bắt đầu hành trình.</p>
+    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bài cẩm nang</a></div>'; ?>
+  </div>
+  <section style="padding-top:18px"><div class="wrap">
+    <div class="postfilter">
+      <input type="search" class="postsearch" placeholder="🔍 Tìm trong cẩm nang…" oninput="filterPosts()">
+    </div>
+    <?php $posts=get_posts('guide',80); if(!$posts) echo '<div class="empty">Chưa có cẩm nang nào. Admin có thể đăng bài đầu tiên từ trang Quản trị.</div>';
+      else { echo '<div class="feed" id="postFeed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
+    <div class="empty" id="postNoMatch" style="display:none;margin-top:18px">Không tìm thấy bài viết phù hợp.</div>
+  </div></section>
+  <script>
+  let postFilter = '';
+  function filterPosts(){
+    const q = (document.querySelector('.postsearch')?.value||'').toLowerCase().trim();
+    let shown = 0, total = 0;
+    document.querySelectorAll('#postFeed > .post').forEach(p=>{
+      total++;
+      const text = p.dataset.search||'';
+      const show = !q || text.includes(q);
+      p.style.display = show ? '' : 'none';
+      if(show) shown++;
+    });
+    const nm = document.getElementById('postNoMatch');
+    if(nm) nm.style.display = (total>0 && shown===0) ? '' : 'none';
+  }
+  </script>
 <?php }
 
 /* ---------------- NỘI QUY ---------------- */
@@ -2627,29 +2714,6 @@ elseif($p==='rules'){ ?>
   </div>
   <section style="padding-top:18px"><div class="wrap">
     <?php $posts=get_posts('rules'); if(!$posts) echo '<div class="empty">Chưa có nội quy nào được đăng. Admin có thể thêm từ trang Quản trị.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
-  </div></section>
-<?php }
-
-/* ---------------- CẬP NHẬT (PATCH NOTES) ---------------- */
-elseif($p==='updates'){
-  $srvFilter=trim($_GET['srv']??''); $srvFilter=mb_substr_safe($srvFilter,0,48);
-  $all=get_posts('update',60);
-  // Tập hợp danh sách server xuất hiện trong các bài cập nhật (để render bộ lọc).
-  $srvs=[]; foreach($all as $po){ $s=trim((string)($po['server']??'')); if($s!=='' && !in_array($s,$srvs,true)) $srvs[]=$s; }
-  $posts = $srvFilter==='' ? $all : array_values(array_filter($all,function($po)use($srvFilter){ return strcasecmp((string)($po['server']??''),$srvFilter)===0; }));
-?>
-  <div class="phead"><div class="k">Cập nhật</div><h1>🔧 Patch Notes &amp; Changelog</h1><p>Theo dõi mọi thay đổi, vá lỗi, và nội dung mới trên từng server.</p>
-    <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bản cập nhật</a></div>'; ?>
-  </div>
-  <section style="padding-top:18px"><div class="wrap">
-    <?php if($srvs){ ?>
-    <div class="shopnav" style="margin-bottom:18px">
-      <a href="?p=updates" class="<?=$srvFilter===''?'on':''?>">🌐 Tất cả</a>
-      <?php foreach($srvs as $s) echo '<a href="?p=updates&srv='.urlencode($s).'" class="'.(strcasecmp($srvFilter,$s)===0?'on':'').'">🖥️ '.h($s).'</a>'; ?>
-    </div>
-    <?php }
-      if(!$posts) echo '<div class="empty">Chưa có bản cập nhật nào'.($srvFilter!==''?' cho server <b>'.h($srvFilter).'</b>':'').'.</div>';
-      else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; } ?>
   </div></section>
 <?php }
 

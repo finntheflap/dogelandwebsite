@@ -28,8 +28,10 @@ $CFG = [
   'authme_hash'  => 'SHA256',          // 'SHA256' (mặc định AuthMe) hoặc 'BCRYPT'
 
   // --- CHẾ ĐỘ DEV: true để test trên XAMPP (hiện link xác minh ngay trên web,
-  //     không cần gửi email). KHI DEPLOY THẬT PHẢI ĐẶT = false ! ---
-  'dev_mode'  => true,
+  //     không cần gửi email). KHI DEPLOY THẬT PHẢI ĐẶT = false !
+  //     LƯU Ý: dù bật, dữ liệu DEMO (tài khoản admin/owner mặc định) CHỈ được
+  //     gieo khi truy cập từ 127.0.0.1 / ::1 — xem dgl_is_local() bên dưới. ---
+  'dev_mode'  => false,
   // --- Tự tạo bảng authme nếu chưa có (tiện test local). Trên server đã chạy
   //     AuthMe thì để true cũng an toàn (không ghi đè bảng cũ). ---
   'auto_create_authme' => true,
@@ -159,6 +161,9 @@ session_start();
 date_default_timezone_set('Asia/Ho_Chi_Minh');
 
 function h($s){ return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+/* Truy cập từ localhost? Dùng để chặn dữ liệu DEMO (mật khẩu mặc định) rò ra prod
+   ngay cả khi 'dev_mode' bị bật nhầm. */
+function dgl_is_local(){ return in_array(($_SERVER['REMOTE_ADDR']??''), ['127.0.0.1','::1','localhost'], true); }
 function csrf_token(){ if(empty($_SESSION['csrf'])) $_SESSION['csrf']=bin2hex(random_bytes(16)); return $_SESSION['csrf']; }
 function csrf_ok(){ return isset($_POST['csrf'],$_SESSION['csrf']) && hash_equals($_SESSION['csrf'],$_POST['csrf']); }
 function flash($m=null){ if($m!==null){ $_SESSION['flash'][]=$m; return; } $f=$_SESSION['flash']??[]; $_SESSION['flash']=[]; return $f; }
@@ -180,7 +185,20 @@ function verify_row($u){
 function open_tickets(){ try{ return (int)db()->query("SELECT COUNT(*) FROM web_tickets WHERE status<>'closed'")->fetchColumn(); }catch(Exception $e){ return 0; } }
 function ticket_code($id){ global $CFG; return ($CFG['ticket_prefix']??'DGL').'-'.str_pad((string)$id,6,'0',STR_PAD_LEFT); }
 function admin_log($admin,$action,$detail=''){ try{ db()->prepare("INSERT INTO web_admin_log(admin,action,detail,created) VALUES(?,?,?,?)")->execute([$admin,$action,mb_substr_safe($detail,0,250),ms()]); }catch(Exception $e){} }
-function rcon_queue($command,$by){ try{ db()->prepare("INSERT INTO web_rcon_queue(command,requested_by,status,created) VALUES(?,?, 'pending',?)")->execute([$command,$by,ms()]); }catch(Exception $e){} }
+/* Sanitize 1 token (tên/rank/suffix) trước khi nối vào lệnh RCON. Chỉ cho phép
+   ký tự an toàn — bất kỳ thứ gì khác sẽ bị loại để chặn injection (\n, ;, ", `). */
+function rcon_arg($s,$max=32){ $s=preg_replace('/[^A-Za-z0-9_]/','', (string)$s); return mb_substr_safe($s,0,$max); }
+/* Sanitize đoạn văn bản tự do (reason/kick message): loại CR/LF/null/dấu " để
+   không thoát khỏi tham số lệnh. */
+function rcon_text($s,$max=120){ $s=preg_replace('/[\r\n\x00"`;]/',' ',(string)$s); return mb_substr_safe(trim($s),0,$max); }
+/* Queue 1 lệnh RCON. Defense in depth: ngay cả khi caller quên sanitize, hàm này
+   vẫn loại CR/LF/null & cắt 250 ký tự (khớp với cột VARCHAR(255)). */
+function rcon_queue($command,$by){
+  $command=preg_replace('/[\r\n\x00]+/',' ',(string)$command);
+  $command=mb_substr_safe(trim($command),0,250);
+  if($command==='') return;
+  try{ db()->prepare("INSERT INTO web_rcon_queue(command,requested_by,status,created) VALUES(?,?, 'pending',?)")->execute([$command,$by,ms()]); }catch(Exception $e){}
+}
 function mb_substr_safe($s,$a,$b){ return function_exists('mb_substr')?mb_substr($s,$a,$b,'UTF-8'):substr($s,$a,$b); }
 function discord_notify($content){
   global $CFG; $url=$CFG['discord_webhook']??''; if(!$url) return false;
@@ -371,17 +389,37 @@ function doge_set($u,$amount){
   }
   try{ db()->prepare("INSERT INTO web_wallet(username,dogecoin,created) VALUES(?,?,?) ON DUPLICATE KEY UPDATE dogecoin=VALUES(dogecoin)")->execute([$u,$amount,ms()]); }catch(Exception $e){}
 }
-/* Cộng Dogecoin */
+/* Cộng Dogecoin — UPDATE delta atomic (không còn read-modify-write). */
 function doge_add($u,$amt){
-  $amt=(int)$amt; if($amt<=0) return true;
-  doge_set($u, doge_balance($u)+$amt);
+  global $CFG; $amt=(int)$amt; if($amt<=0) return true;
+  if(!empty($CFG['pp_enabled'])){
+    try{ $key=pp_key($u);
+      db()->prepare("INSERT INTO `{$CFG['pp_table']}`(`{$CFG['pp_uuid_col']}`,`{$CFG['pp_points_col']}`) VALUES(?,?) ON DUPLICATE KEY UPDATE `{$CFG['pp_points_col']}`=`{$CFG['pp_points_col']}`+VALUES(`{$CFG['pp_points_col']}`)")->execute([$key,$amt]);
+    }catch(Exception $e){}
+  }
+  try{ db()->prepare("INSERT INTO web_wallet(username,dogecoin,created) VALUES(?,?,?) ON DUPLICATE KEY UPDATE dogecoin=dogecoin+VALUES(dogecoin)")->execute([$u,$amt,ms()]); }catch(Exception $e){}
   return true;
 }
-/* Trừ Dogecoin — trả false nếu không đủ. $track=true sẽ cộng vào "tổng đã tiêu" (BXH). */
+/* Trừ Dogecoin — UPDATE có guard `dogecoin>=?`; chỉ thành công khi rowCount==1
+   (ngăn over-draft khi 2 request chạy song song). $track=true cộng vào "đã tiêu" BXH. */
 function doge_take($u,$amt,$track=true){
-  $amt=(int)$amt; if($amt<=0) return true;
-  $bal=doge_balance($u); if($bal<$amt) return false;
-  doge_set($u,$bal-$amt);
+  global $CFG; $amt=(int)$amt; if($amt<=0) return true;
+  $ok=false;
+  if(!empty($CFG['pp_enabled'])){
+    try{ $key=pp_key($u);
+      $st=db()->prepare("UPDATE `{$CFG['pp_table']}` SET `{$CFG['pp_points_col']}`=`{$CFG['pp_points_col']}`-? WHERE `{$CFG['pp_uuid_col']}`=? AND `{$CFG['pp_points_col']}`>=?");
+      $st->execute([$amt,$key,$amt]);
+      $ok = $st->rowCount()===1;
+    }catch(Exception $e){ return false; }
+  } else {
+    try{
+      db()->prepare("INSERT IGNORE INTO web_wallet(username,created) VALUES(?,?)")->execute([$u,ms()]);
+      $st=db()->prepare("UPDATE web_wallet SET dogecoin=dogecoin-? WHERE username=? AND dogecoin>=?");
+      $st->execute([$amt,$u,$amt]);
+      $ok = $st->rowCount()===1;
+    }catch(Exception $e){ return false; }
+  }
+  if(!$ok) return false;
   if($track){ try{ db()->prepare("INSERT INTO web_wallet(username,doge_spent,created) VALUES(?,?,?) ON DUPLICATE KEY UPDATE doge_spent=doge_spent+VALUES(doge_spent)")->execute([$u,$amt,ms()]); }catch(Exception $e){} }
   return true;
 }
@@ -424,15 +462,21 @@ function auc_settle_due(){
     $due=db()->query("SELECT * FROM web_auctions WHERE status='active' AND end_at<=$now")->fetchAll();
     foreach($due as $a){
       $qty=max(1,(int)($a['qty']??1));
-      if($a['top_bidder']!==''){
-        doge_add($a['seller'],(int)$a['price']); // người bán nhận tiền chốt
-        // giao vật phẩm vào kho người thắng + (nếu muốn) lệnh give in-game
+      $sold = $a['top_bidder']!=='';
+      // Claim trước: chỉ request nào thực sự lật status='active'→'sold|expired'
+      // mới được trả tiền / phát vật phẩm. Hai page-load song song sẽ chỉ có 1
+      // rowCount==1, tránh trả thưởng & spawn item 2 lần.
+      $claim = db()->prepare("UPDATE web_auctions SET status=? WHERE id=? AND status='active'");
+      $claim->execute([$sold?'sold':'expired', $a['id']]);
+      if($claim->rowCount()!==1) continue;
+      if($sold){
+        doge_add($a['seller'],(int)$a['price']);
         db()->prepare("INSERT INTO web_inventory(username,mode,item,item_key,qty,color,image) VALUES(?,?,?,?,?, '#f2b631', ?)")
             ->execute([$a['top_bidder'],$a['mode']??'',$a['item'],$a['item_key'],$qty,$a['image']??'']);
-        rcon_queue('give '.$a['top_bidder'].' minecraft:'.$a['item_key'].' '.$qty, 'AUCTION');
+        $gw=rcon_arg($a['top_bidder'],32); $gk=rcon_arg($a['item_key'],48);
+        if($gw!=='' && $gk!=='') rcon_queue('give '.$gw.' minecraft:'.$gk.' '.(int)$qty, 'AUCTION');
         notify($a['top_bidder'],'gift','Bạn đã thắng đấu giá 🏆','"'.$a['item'].'" với '.doge_short((int)$a['price']).' — đã vào kho của bạn.','?p=auction','SYSTEM');
         notify($a['seller'],'gift','Phiên đấu giá đã bán 💰','"'.$a['item'].'" bán cho '.$a['top_bidder'].' (+'.doge_short((int)$a['price']).').','?p=auction','SYSTEM');
-        db()->prepare("UPDATE web_auctions SET status='sold' WHERE id=?")->execute([$a['id']]);
       } else {
         doge_add($a['seller'],(int)$a['listing_fee']); // hoàn phí mở
         if(!empty($a['from_inv'])){ // trả vật phẩm về kho người bán
@@ -440,7 +484,6 @@ function auc_settle_due(){
               ->execute([$a['seller'],$a['mode']??'',$a['item'],$a['item_key'],$qty,$a['image']??'']);
         }
         notify($a['seller'],'info','Phiên đấu giá hết hạn','"'.$a['item'].'" không có ai đấu — đã hoàn phí mở'.(!empty($a['from_inv'])?' và trả vật phẩm về kho':'').'.','?p=auction','SYSTEM');
-        db()->prepare("UPDATE web_auctions SET status='expired' WHERE id=?")->execute([$a['id']]);
       }
     }
   }catch(Exception $e){}
@@ -627,8 +670,9 @@ function db(){
     $items=[['Vé /fly 7 ngày',250,'#56cfd6'],['Pet Shiba Vàng',800,'#d9a441'],['Bộ Giáp Netherite',1200,'#5b4636'],['Kiếm Phù Phép VIP',600,'#9aa0a6'],['Hộp Quà Ngẫu Nhiên',150,'#e0584a'],['Gói /sethome +5',300,'#67c96a'],['Cánh Thiên Thần (Skin)',950,'#b39ce8'],['Thú Cưỡi Rồng',1500,'#f2b631']];
     $i=10; foreach($items as $it) $ins->execute(['item',$it[0],$it[1],$it[2],null,$i++]);
   }
-  // --- Tài khoản & ví DEMO (CHỈ khi dev_mode). Production: đặt dev_mode=false + xoá. ---
-  if(!empty($CFG['dev_mode'])){
+  // --- Tài khoản & ví DEMO (CHỈ khi dev_mode VÀ truy cập từ localhost).
+  //     Production: đặt dev_mode=false + xoá. ---
+  if(!empty($CFG['dev_mode']) && dgl_is_local()){
     try{
       $t=$CFG['authme_table'];
       $demos=[['DogeAdmin','admin123','admin@dogeland.vn',50000,9999,1,142,2000000],
@@ -668,7 +712,7 @@ function db(){
   try{ foreach($pdo->query("SELECT id FROM web_tickets WHERE code IS NULL OR code=''")->fetchAll(PDO::FETCH_COLUMN) as $tid0){ $pdo->prepare("UPDATE web_tickets SET code=? WHERE id=?")->execute([($CFG['ticket_prefix']??'DGL').'-'.str_pad((string)$tid0,6,'0',STR_PAD_LEFT),$tid0]); } }catch(Exception $e){}
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_inventory(id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(64) NOT NULL, mode VARCHAR(24) NOT NULL, item VARCHAR(80) NOT NULL, qty INT NOT NULL DEFAULT 1, color VARCHAR(16) NOT NULL DEFAULT '#888888', KEY k_um(username,mode)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_verify(username VARCHAR(64) PRIMARY KEY, phone VARCHAR(20) NOT NULL DEFAULT '', phone_verified TINYINT NOT NULL DEFAULT 0, phone_code VARCHAR(8) NOT NULL DEFAULT '', discord_id VARCHAR(40) NOT NULL DEFAULT '', discord_name VARCHAR(80) NOT NULL DEFAULT '', discord_verified TINYINT NOT NULL DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-  if(!empty($CFG['dev_mode'])){
+  if(!empty($CFG['dev_mode']) && dgl_is_local()){
     try{
       $t=$CFG['authme_table']; $now=ms();
       $chk=$pdo->prepare("SELECT 1 FROM `$t` WHERE LOWER(username)=? LIMIT 1");
@@ -1003,8 +1047,10 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       doge_set($uname,$doge); // ghi cả PlayerPoints lẫn mirror
       if($email!=='') db()->prepare("UPDATE `$t` SET email=? WHERE LOWER(username)=?")->execute([$email,strtolower($uname)]);
       if($newpw!=='') db()->prepare("UPDATE `$t` SET password=? WHERE LOWER(username)=?")->execute([authme_make_hash($newpw),strtolower($uname)]);
-      if($rank!==($old['rank_name']??'') && $rank!=='') rcon_queue('lp user '.$uname.' parent set '.$rank, $user);
-      if($suffix!==($old['suffix']??'')) rcon_queue('lp user '.$uname.' meta setsuffix "'.$suffix.'"', $user);
+      // Whitelist tham số trước khi nối vào lệnh RCON (xem rcon_arg/rcon_text).
+      $rcUname=rcon_arg($uname,32); $rcRank=rcon_arg($rank,32); $rcSuffix=rcon_text($suffix,24);
+      if($rcUname!=='' && $rank!==($old['rank_name']??'') && $rcRank!=='') rcon_queue('lp user '.$rcUname.' parent set '.$rcRank, $user);
+      if($rcUname!=='' && $suffix!==($old['suffix']??'')) rcon_queue('lp user '.$rcUname.' meta setsuffix "'.$rcSuffix.'"', $user);
       admin_log($user,'user_edit',$uname.' (doge='.$doge.($rank?', rank='.$rank:'').($suffix!==''?', suffix='.$suffix:'').')');
       flash(['ok','Đã cập nhật tài khoản '.$uname.'.'.(($rank!==($old['rank_name']??'')||$suffix!==($old['suffix']??''))?' Lệnh rank/suffix đã đưa vào hàng đợi áp dụng in-game.':'')]);
     }catch(Exception $e){ flash(['error',db_err($e)]); }
@@ -1026,7 +1072,8 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     try{
       wallet($uname);
       db()->prepare("UPDATE web_wallet SET banned=1, ban_reason=?, banned_by=?, banned_at=? WHERE username=?")->execute([$reason,$user,ms(),$uname]);
-      rcon_queue('ban '.$uname.' '.($reason!==''?$reason:'Vi phạm nội quy'), $user);
+      $rcUname=rcon_arg($uname,32); $rcReason=rcon_text($reason!==''?$reason:'Vi phạm nội quy',120);
+      if($rcUname!=='') rcon_queue('ban '.$rcUname.' '.$rcReason, $user);
       notify($uname,'info','Tài khoản bị khoá (ban)',$reason!==''?('Lý do: '.$reason):'Liên hệ admin để biết thêm.','','SYSTEM');
       admin_log($user,'user_ban',$uname.($reason!==''?' — '.$reason:''));
       flash(['ok','Đã ban '.$uname.'.']);
@@ -1038,7 +1085,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $uname=trim($_POST['username']??''); if($uname===''){ redirect('admin&tab=users'); }
     try{
       db()->prepare("UPDATE web_wallet SET banned=0, ban_reason='', banned_by='', banned_at=0 WHERE username=?")->execute([$uname]);
-      rcon_queue('pardon '.$uname, $user);
+      $rcUname=rcon_arg($uname,32); if($rcUname!=='') rcon_queue('pardon '.$rcUname, $user);
       notify($uname,'info','Tài khoản đã được mở khoá','Bạn có thể đăng nhập lại bình thường.','?p=login','SYSTEM');
       admin_log($user,'user_unban',$uname);
       flash(['ok','Đã gỡ ban '.$uname.'.']);
@@ -1070,15 +1117,23 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     try{
       $st=db()->prepare("SELECT * FROM web_topups WHERE id=?"); $st->execute([$id]); $tx=$st->fetch();
       if($tx){
-        if($status==='success' && $tx['status']!=='success'){
-          doge_add($tx['username'], (int)$tx['diamonds']); // cột 'diamonds' giờ là số Dogecoin của gói
-        }
-        db()->prepare("UPDATE web_topups SET status=? WHERE id=?")->execute([$status,$id]);
-        if($status==='success' && $tx['status']!=='success')
+        // Idempotent: chỉ cộng tiền cho LẦN gọi thực sự chuyển trạng thái sang
+        // 'success'. Hai cú click admin song song sẽ chỉ có 1 lần rowCount==1.
+        $upd=db()->prepare("UPDATE web_topups SET status=? WHERE id=? AND status<>?");
+        $upd->execute([$status,$id,$status]);
+        $changed = $upd->rowCount()===1;
+        if($changed && $status==='success'){
+          doge_add($tx['username'], (int)$tx['diamonds']);
           notify($tx['username'],'topup','Nạp thành công 🎉','+'.doge_fmt((int)$tx['diamonds']).' ('.h($tx['package']).') đã vào ví.','?p=profile',$user);
-        elseif($status==='rejected')
+        } elseif($changed && $status==='rejected'){
           notify($tx['username'],'topup','Giao dịch bị từ chối','Giao dịch '.h($tx['package']).' đã bị từ chối. Liên hệ admin nếu cần hỗ trợ.','?p=topup',$user);
-        admin_log($user,'topup_'.$status,'GD #'.$id.' của '.$tx['username']); flash(['ok','Đã cập nhật giao dịch #'.$id.' → '.$status]);
+        }
+        if($changed){
+          admin_log($user,'topup_'.$status,'GD #'.$id.' của '.$tx['username']);
+          flash(['ok','Đã cập nhật giao dịch #'.$id.' → '.$status]);
+        } else {
+          flash(['ok','Giao dịch #'.$id.' đã ở trạng thái '.$status.'.']);
+        }
       }
     }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('admin&tab=topups');
@@ -1185,7 +1240,30 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   }
   if($act==='auc_delete'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
-    try{ db()->prepare("DELETE FROM web_auctions WHERE id=?")->execute([(int)($_POST['id']??0)]); flash(['ok','Đã xoá phiên đấu giá.']); }catch(Exception $e){}
+    $id=(int)($_POST['id']??0);
+    try{
+      $st=db()->prepare("SELECT * FROM web_auctions WHERE id=?"); $st->execute([$id]); $a=$st->fetch();
+      if($a){
+        $refunded=false;
+        // Nếu phiên còn active thì phải hoàn cọc người đang giữ giá + phí mở của
+        // người bán + trả vật phẩm về kho. Trước đây DELETE thẳng → mất hết escrow.
+        if($a['status']==='active'){
+          if($a['top_bidder']!==''){
+            doge_add($a['top_bidder'],(int)$a['price']);
+            notify($a['top_bidder'],'info','Phiên đấu giá bị admin huỷ','"'.$a['item'].'" — đã hoàn '.doge_short((int)$a['price']).'.','?p=auction','SYSTEM');
+          }
+          doge_add($a['seller'],(int)$a['listing_fee']);
+          if(!empty($a['from_inv'])){
+            db()->prepare("INSERT INTO web_inventory(username,mode,item,item_key,qty,color,image) VALUES(?,?,?,?,?, '#f2b631', ?)")
+                ->execute([$a['seller'],$a['mode']??'',$a['item'],$a['item_key'],max(1,(int)($a['qty']??1)),$a['image']??'']);
+          }
+          $refunded=true;
+        }
+        db()->prepare("DELETE FROM web_auctions WHERE id=?")->execute([$id]);
+        admin_log($user,'auction_delete','#'.$id.' "'.$a['item'].'" refunded='.($refunded?'yes':'no'));
+        flash(['ok','Đã xoá phiên đấu giá'.($refunded?' và hoàn cọc/phí/vật phẩm':'').'.']);
+      }
+    }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('admin&tab=auc');
   }
 

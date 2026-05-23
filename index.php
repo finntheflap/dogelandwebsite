@@ -1970,7 +1970,7 @@ section{padding:58px 0}
 .pkg2.on{border-color:var(--gold);background:rgba(242,182,49,.1);box-shadow:0 0 0 1px var(--gold-d)}
 .pkg2-amt{font-size:1.25rem;font-weight:800;color:var(--ink)} .pkg2-amt small{font-size:.78rem;color:var(--muted);font-weight:600;margin-left:1px}
 .pkg2-dia{color:var(--diamond);font-weight:800;font-size:.9rem;margin-top:5px;display:flex;align-items:center;justify-content:center;gap:5px}
-.pkg2-dia .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px}
+.pkg2-dia .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px;flex-shrink:0}
 .pkg2-bn{color:var(--green);font-size:.74rem;font-weight:700;margin-top:5px}
 .pkg2-custom{display:flex;flex-direction:column;justify-content:center;border-style:dashed}
 .rb2{position:absolute;top:-9px;right:10px;background:linear-gradient(180deg,#ffd35a,var(--gold-d));color:#3a2700;font-weight:800;font-size:.62rem;padding:3px 9px;border-radius:20px;letter-spacing:.5px}
@@ -1986,7 +1986,7 @@ section{padding:58px 0}
 .tusum-div{height:1px;background:var(--line);margin:12px 0}
 .tusum-big{display:flex;justify-content:space-between;align-items:center;font-size:1rem}
 .tusum-big b{font-size:1.5rem;display:flex;align-items:center;gap:7px}
-.tusum-big .wd{width:13px;height:13px;background:var(--diamond);transform:rotate(45deg);border-radius:2px}
+.tusum-big .wd{width:13px;height:13px;background:var(--diamond);transform:rotate(45deg);border-radius:2px;flex-shrink:0}
 .tusum-xu{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;color:var(--muted);margin-top:6px}
 @media(max-width:860px){.tugrid{grid-template-columns:1fr}.tusum{position:static}.pkgrid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:480px){.pmgrid{grid-template-columns:1fr}}
@@ -1998,7 +1998,7 @@ section{padding:58px 0}
 .rrow .rv{font-weight:700;font-size:.92rem}
 .rrow .rarrow{color:var(--muted);font-size:.8rem}
 .rrow .rd{color:var(--diamond);font-weight:800;font-size:.92rem;display:flex;align-items:center;gap:6px}
-.rrow .rd .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px}
+.rrow .rd .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px;flex-shrink:0}
 @media(max-width:480px){.ratetbl{grid-template-columns:1fr}}
 
 /* shop */
@@ -2104,7 +2104,7 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
 .urole.adm{color:var(--gold)} .urole.owner{color:#ff8db0}
 .ubal{display:flex;gap:8px;padding:0 9px 4px}
 .ubal span{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:.8rem;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--diamond)}
-.ubal .cxu{color:var(--gold)} .ubal .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px}
+.ubal .cxu{color:var(--gold)} .ubal .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px;flex-shrink:0}
 .usep{height:1px;background:var(--line);margin:7px 4px}
 .ulabel{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--gold);padding:4px 11px 6px}
 .udd a{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:9px;text-decoration:none;color:var(--ink);font-size:.9rem;font-weight:600;transition:background var(--t)}
@@ -2113,7 +2113,7 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
 .balbar{margin-top:14px;font-size:.92rem;color:var(--muted)}
 
 /* ===== DOGECOIN chip + gift-code mini form (trong profile slide-down) ===== */
-.ubal .dgc{color:#f7c948} .ubal .dgc .wd{width:11px;height:11px;background:radial-gradient(circle at 35% 30%,#ffe08a,#d99a17);border-radius:50%;transform:none;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.ubal .dgc{color:#f7c948} .ubal .dgc .wd{width:11px;height:11px;background:radial-gradient(circle at 35% 30%,#ffe08a,#d99a17);border-radius:50%;transform:none;box-shadow:0 0 0 1px rgba(0,0,0,.25);flex-shrink:0}
 .ubal-top{flex:none!important;background:rgba(87,182,90,.14)!important;border-color:rgba(87,182,90,.4)!important;color:var(--green)!important;font-size:.78rem!important}
 .giftmini{display:flex;gap:6px;padding:2px 9px 4px}
 .giftmini input{flex:1;min-width:0;background:rgba(0,0,0,.28);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;color:var(--ink);font:inherit;font-size:.82rem;letter-spacing:.5px;text-transform:uppercase}
@@ -2122,7 +2122,7 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
 
 /* ===== Đồng Dogecoin (huy hiệu nhỏ tái sử dụng) ===== */
 .dogechip{display:inline-flex;align-items:center;gap:7px;font-weight:800;color:#f7c948}
-.dogechip::before{content:"";width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe08a,#d99a17);box-shadow:inset 0 0 0 1px rgba(0,0,0,.25),0 1px 3px rgba(0,0,0,.4)}
+.dogechip::before{content:"";width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe08a,#d99a17);box-shadow:inset 0 0 0 1px rgba(0,0,0,.25),0 1px 3px rgba(0,0,0,.4);flex-shrink:0}
 .balbar .dogechip{font-size:1.05rem}
 
 /* ===== Hub cửa hàng (3 trang con) ===== */

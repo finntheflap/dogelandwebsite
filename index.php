@@ -2104,7 +2104,7 @@ textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(
 .urole{font-size:.72rem;font-weight:700;color:var(--muted);margin-top:2px}
 .urole.adm{color:var(--gold)} .urole.owner{color:#ff8db0}
 .ubal{display:flex;gap:8px;padding:0 9px 4px}
-.ubal span{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:.8rem;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--diamond)}
+.ubal>span{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:.8rem;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--diamond)}
 .ubal .cxu{color:var(--gold)} .ubal .wd{width:9px;height:9px;background:var(--diamond);transform:rotate(45deg);border-radius:2px;flex-shrink:0}
 .usep{height:1px;background:var(--line);margin:7px 4px}
 .ulabel{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--gold);padding:4px 11px 6px}

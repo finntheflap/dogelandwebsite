@@ -1812,7 +1812,7 @@ if(in_array($p,$NEEDS_LOGIN,true) && !$user){ flash(['error','Bạn cần đăng
    VIEW
    ========================================================================== */
 $CSRF=csrf_token();
-$nav=[['home','Trang chủ'],['events','Sự kiện & Cập nhật'],['guide','Cẩm nang'],['rules','Nội quy'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
+$nav=[['home','Trang chủ'],['events','Tin tức'],['guide','Cẩm nang'],['rules','Nội quy'],['shop','Cửa hàng'],['top','Xếp hạng'],['topup','Nạp thẻ']];
 /* Các trang con thuộc nhóm "Cửa hàng" (để highlight nav + sub-tab dùng chung) */
 $SHOP_PAGES=['shop','auction','ranks','market'];
 /* Gợi ý mã item cho ô icon (đấu giá & chợ trời) */
@@ -2619,7 +2619,7 @@ if($p==='home'){ ?>
   </section>
 
   <section><div class="wrap">
-    <div class="shead"><div class="k">Bảng tin</div><h2>Sự kiện &amp; Cập nhật</h2><p>Tin tức, sự kiện sắp tới và bản cập nhật mới nhất từ Dogeland Network.</p></div>
+    <div class="shead"><div class="k">Bảng tin</div><h2>Tin tức</h2><p>Sự kiện, thông báo và bản cập nhật mới nhất từ Dogeland Network.</p></div>
     <?php $posts=get_posts(['event','update','news'],12); if(!$posts) echo '<div class="empty">Chưa có bài viết nào.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; echo '<div style="text-align:center;margin-top:22px"><a class="btn btn-ghost" href="?p=events">Xem tất cả →</a></div>'; } ?>
   </div></section>
 
@@ -2630,13 +2630,13 @@ if($p==='home'){ ?>
   </div>
 <?php }
 
-/* ---------------- SỰ KIỆN & CẬP NHẬT (gộp 2 loại bài) ---------------- */
+/* ---------------- TIN TỨC (gộp sự kiện + thông báo + cập nhật) ---------------- */
 elseif($p==='events'){
-  $posts = get_posts(['event','update'], 80);
+  $posts = get_posts(['event','news','update'], 80);
   // Tập hợp danh sách server xuất hiện trong các bài cập nhật để render chip lọc.
   $srvs=[]; foreach($posts as $po){ if($po['type']==='update' && !empty($po['server']) && !in_array($po['server'],$srvs,true)) $srvs[]=$po['server']; }
 ?>
-  <div class="phead"><div class="k">Bảng tin</div><h1>🎉 Sự kiện &amp; Cập nhật</h1><p>Tin tức, sự kiện sắp tới và bản cập nhật mới nhất trên server.</p>
+  <div class="phead"><div class="k">Bảng tin</div><h1>📰 Tin tức</h1><p>Sự kiện, thông báo và bản cập nhật mới nhất trên server.</p>
     <?php if($IS_ADMIN) echo '<div style="margin-top:14px"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=posts">➕ Đăng bài mới</a></div>'; ?>
   </div>
   <section style="padding-top:18px"><div class="wrap">
@@ -2645,6 +2645,7 @@ elseif($p==='events'){
       <div class="postchips">
         <a href="#" class="chip on" data-f="" onclick="setPostFilter(event,'')">🌐 Tất cả</a>
         <a href="#" class="chip" data-f="t:event" onclick="setPostFilter(event,'t:event')">🎉 Sự kiện</a>
+        <a href="#" class="chip" data-f="t:news" onclick="setPostFilter(event,'t:news')">📢 Thông báo</a>
         <a href="#" class="chip" data-f="t:update" onclick="setPostFilter(event,'t:update')">🔧 Cập nhật</a>
         <?php foreach($srvs as $s) echo '<a href="#" class="chip" data-f="s:'.h(strtolower($s)).'" onclick="setPostFilter(event,\'s:'.h(strtolower($s)).'\')">🖥️ '.h($s).'</a>'; ?>
       </div>

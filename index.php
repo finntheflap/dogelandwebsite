@@ -2511,9 +2511,9 @@ html,body{overflow-x:hidden}
           </div>
         </div>
         <div class="udrop">
-          <button class="uchip" onclick="document.getElementById('udd').classList.toggle('on')"><img src="<?=h($av)?>30" onerror="this.onerror=null;this.src='?img=doge'" alt=""><span class="un"><?=h($user)?></span><span class="car">▾</span></button>
+          <button class="uchip" onclick="document.getElementById('udd').classList.toggle('on')"><img src="<?=h($av)?>30" data-skin-user="<?=h($user)?>" data-skin-size="30" onerror="skinFallback(this)" alt=""><span class="un"><?=h($user)?></span><span class="car">▾</span></button>
           <div class="udd <?= $IS_ADMIN?'isadmin':'' ?>" id="udd">
-            <div class="uhead"><img src="<?=h($av)?>48" onerror="this.onerror=null;this.src='?img=doge'" alt=""><div><div class="un2"><?=h($user)?></div><div class="urole <?= is_owner($user)?'owner':($IS_ADMIN?'adm':'') ?>"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div></div>
+            <div class="uhead"><img src="<?=h($av)?>48" data-skin-user="<?=h($user)?>" data-skin-size="48" onerror="skinFallback(this)" alt=""><div><div class="un2"><?=h($user)?></div><div class="urole <?= is_owner($user)?'owner':($IS_ADMIN?'adm':'') ?>"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div></div>
             <div class="ubal"><span class="dgc"><span class="wd"></span> <?=doge_short(doge_balance($user))?></span><a href="?p=topup" class="ubal-top">+ Nạp</a></div>
             <form class="giftmini" method="post" action="?p=profile">
               <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="gift_redeem"><input type="hidden" name="from" value="<?=h($p)?>">
@@ -2707,7 +2707,7 @@ elseif($p==='post'){
         $mfmt=function($t){ return preg_replace('/@([A-Za-z0-9_]{3,16})/u','<span class="mention">@$1</span>', h($t)); };
         $cmtRow=function($cm,$isReply,$replyParentId) use($sapi,$IS_ADMIN,$user,$po,$CSRF,$mfmt){
           $own = $IS_ADMIN || strtolower($cm['username'])===strtolower((string)$user);
-          $o='<div class="cmt'.($isReply?' reply':'').'"><img src="'.$sapi.'/avatar/'.urlencode($cm['username']).'/38" onerror="this.onerror=null;this.src=\'?img=doge\'" alt=""><div class="cb"><div><span class="cu">'.h($cm['username']).'</span><span class="ct">'.date('d/m/Y H:i',(int)($cm['created']/1000)).'</span></div><div class="cc">'.$mfmt($cm['content']).'</div>';
+          $o='<div class="cmt'.($isReply?' reply':'').'"><img src="'.$sapi.'/avatar/'.urlencode($cm['username']).'/38" data-skin-user="'.h($cm['username']).'" data-skin-size="38" onerror="skinFallback(this)" alt=""><div class="cb"><div><span class="cu">'.h($cm['username']).'</span><span class="ct">'.date('d/m/Y H:i',(int)($cm['created']/1000)).'</span></div><div class="cc">'.$mfmt($cm['content']).'</div>';
           if($user){
             $o.='<div class="cact"><button type="button" class="crep" onclick="toggleReply('.(int)$cm['id'].')">↩ Trả lời</button></div>';
             $o.='<form class="replybox" id="rb'.(int)$cm['id'].'" method="post" action="?p=post" style="display:none;margin-left:0">'
@@ -2751,7 +2751,7 @@ elseif($p==='admin'){
   <div class="adminmode">
     <div class="wrap"><div class="amshell">
       <div class="ammain">
-        <div class="amhead"><div><div class="k" style="margin:0">Admin Mode</div><h1 style="font-size:1.8rem;font-weight:800;line-height:1.1;margin-top:4px"><?=h($titles[$tab]??'Dashboard')?></h1></div><span class="amwho"><img src="<?=h($CFG['skin_api'])?>/avatar/<?=urlencode($user)?>/30" onerror="this.onerror=null;this.src='?img=doge'" alt=""><?=h($user)?> · <?= is_owner($user)?'Owner':'Admin' ?></span></div>
+        <div class="amhead"><div><div class="k" style="margin:0">Admin Mode</div><h1 style="font-size:1.8rem;font-weight:800;line-height:1.1;margin-top:4px"><?=h($titles[$tab]??'Dashboard')?></h1></div><span class="amwho"><img src="<?=h($CFG['skin_api'])?>/avatar/<?=urlencode($user)?>/30" data-skin-user="<?=h($user)?>" data-skin-size="30" onerror="skinFallback(this)" alt=""><?=h($user)?> · <?= is_owner($user)?'Owner':'Admin' ?></span></div>
 
     <?php if($tab==='dash'){
       $stat=function($q,$d=0){ try{ return (int)db()->query($q)->fetchColumn(); }catch(Exception $e){ return $d; } };
@@ -2784,7 +2784,7 @@ elseif($p==='admin'){
         <div class="card" style="padding:0;overflow:hidden">
           <div class="ahd">Hoạt động Admin gần đây</div>
           <?php if(!$recentL) echo '<div class="cmid">Chưa có hoạt động.</div>';
-            else { echo '<div style="padding:6px 0">'; foreach($recentL as $lg) echo '<div class="logrow"><img src="'.h($CFG['skin_api']).'/avatar/'.urlencode($lg['admin']).'/28" onerror="this.onerror=null;this.src=\'?img=doge\'" alt=""><div class="lgb"><span class="lga">'.h($lg['admin']).'</span> <span class="lgac">'.h($lg['action']).'</span><div class="lgd">'.h($lg['detail']).'</div></div><span class="lgt">'.date('d/m H:i',(int)($lg['created']/1000)).'</span></div>'; echo '</div>'; } ?>
+            else { echo '<div style="padding:6px 0">'; foreach($recentL as $lg) echo '<div class="logrow"><img src="'.h($CFG['skin_api']).'/avatar/'.urlencode($lg['admin']).'/28" data-skin-user="'.h($lg['admin']).'" data-skin-size="28" onerror="skinFallback(this)" alt=""><div class="lgb"><span class="lga">'.h($lg['admin']).'</span> <span class="lgac">'.h($lg['action']).'</span><div class="lgd">'.h($lg['detail']).'</div></div><span class="lgt">'.date('d/m H:i',(int)($lg['created']/1000)).'</span></div>'; echo '</div>'; } ?>
         </div>
       </div>
 
@@ -3243,7 +3243,7 @@ elseif($p==='top'){
   <section style="padding-top:14px"><div class="wrap" style="max-width:780px">
     <div class="tabs"><?php foreach($cats as $c) echo '<a class="tab'.($cat===$c[0]?' on':'').'" href="?p=top&cat='.$c[0].'">'.h($c[1]).'</a>'; ?></div>
     <?php if($user){
-      if($myRank>0) echo '<div class="myrank"><span class="badge">#'.$myRank.'</span><div class="who"><b>'.h($user).'</b><div>Bạn đang ở hạng #'.$myRank.' với '.($isDoge?doge_short($myVal):number_format($myVal,0,',','.').' '.$unit).'</div></div><img class="lbav" src="'.h($sapi).'/avatar/'.urlencode($user).'/40" onerror="this.src=\'?img=doge\'" alt=""></div>';
+      if($myRank>0) echo '<div class="myrank"><span class="badge">#'.$myRank.'</span><div class="who"><b>'.h($user).'</b><div>Bạn đang ở hạng #'.$myRank.' với '.($isDoge?doge_short($myVal):number_format($myVal,0,',','.').' '.$unit).'</div></div><img class="lbav" src="'.h($sapi).'/avatar/'.urlencode($user).'/40" data-skin-user="'.h($user).'" data-skin-size="40" onerror="skinFallback(this)" alt=""></div>';
       else echo '<div class="myrank"><span class="badge">—</span><div class="who"><b>'.h($user).'</b><div>Bạn chưa có mặt trong bảng này. Hãy tham gia để ghi tên mình!</div></div></div>';
     } ?>
     <div class="card" id="lbcard" style="padding:0;overflow:hidden" data-cat="<?=h($cat)?>">
@@ -3252,7 +3252,7 @@ elseif($p==='top'){
           $mine = $user && strtolower($r['name'])===strtolower($user);
           $val = $isDoge ? ('<span class="dsym">Ð</span>'.number_format($r['val'],0,',','.')) : (number_format($r['val'],0,',','.').' <small>'.$unit.'</small>');
           echo '<div class="lbrow"'.($mine?' style="background:rgba(242,182,49,.07)"':'').'><span class="lbrk '.$medal.'">'.$rk.'</span>'
-              .'<img class="lbav" src="'.h($sapi).'/avatar/'.urlencode($r['name']).'/34" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'
+              .'<img class="lbav" src="'.h($sapi).'/avatar/'.urlencode($r['name']).'/34" data-skin-user="'.h($r['name']).'" data-skin-size="34" onerror="skinFallback(this)" alt="">'
               .'<span class="lbn">'.h($r['name']).($mine?' <small style="color:var(--gold)">(bạn)</small>':'').'</span>'
               .'<span class="lbv">'.$val.'</span></div>';
         } echo '</div>'; } ?>
@@ -3275,7 +3275,7 @@ elseif($p==='top'){
           : (Number(r.val).toLocaleString('vi-VN')+' <small>'+esc(d.unit)+'</small>');
         h+='<div class="lbrow"'+(mine?' style="background:rgba(242,182,49,.07)"':'')+
           '><span class="lbrk '+medal+'">'+rk+'</span>'+
-          '<img class="lbav" src="'+SAPI+'/avatar/'+encodeURIComponent(r.name)+'/34" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'+
+          '<img class="lbav" src="'+SAPI+'/avatar/'+encodeURIComponent(r.name)+'/34" data-skin-user="'+esc(r.name)+'" data-skin-size="34" onerror="skinFallback(this)" alt="">'+
           '<span class="lbn">'+esc(r.name)+(mine?' <small style="color:var(--gold)">(bạn)</small>':'')+'</span>'+
           '<span class="lbv">'+val+'</span></div>';
       });
@@ -3318,7 +3318,7 @@ elseif($p==='profile'){
   <section style="padding-top:14px"><div class="wrap">
     <div class="admin-grid" style="margin-bottom:20px">
       <div class="card" style="padding:26px">
-        <div class="pskin"><img src="<?=h($CFG['skin_api'])?>/body/<?=urlencode($user)?>/right" onerror="this.onerror=null;this.src='<?=h($av)?>100'" alt="skin"><div style="font-weight:800;font-size:1.3rem;margin-top:10px"><?=h($user)?></div><div class="sub2"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div>
+        <div class="pskin"><img src="<?=h($CFG['skin_api'])?>/body/<?=urlencode($user)?>/right" data-skin-user="<?=h($user)?>" data-skin-size="120" onerror="skinFallback(this)" alt="skin"><div style="font-weight:800;font-size:1.3rem;margin-top:10px"><?=h($user)?></div><div class="sub2"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div>
         <div style="margin-top:16px">
           <div class="pstat"><span><?=h($CFG['doge_label']??'Dogecoin')?></span><b class="dogechip"><?=number_format($bal,0,',','.')?></b></div>
           <div class="pstat"><span>Đã tiêu</span><b style="color:#f7c948"><?=number_format($spent,0,',','.')?></b></div>
@@ -3445,17 +3445,17 @@ elseif($p==='ticket'){
           <span class="tst <?=h($tk['status'])?>"><?=$sl[$tk['status']]??$tk['status']?></span>
         </div>
         <div class="tkmeta">
-          <div><div class="ml">Người gửi</div><div class="mv"><img src="<?=$sapi?>/avatar/<?=urlencode($tk['username'])?>/22" onerror="this.onerror=null;this.src='?img=doge'" alt=""><?=h($tk['username'])?></div></div>
+          <div><div class="ml">Người gửi</div><div class="mv"><img src="<?=$sapi?>/avatar/<?=urlencode($tk['username'])?>/22" data-skin-user="<?=h($tk['username'])?>" data-skin-size="22" onerror="skinFallback(this)" alt=""><?=h($tk['username'])?></div></div>
           <div><div class="ml">Loại yêu cầu</div><div class="mv"><?=h($tk['category'])?></div></div>
           <div><div class="ml">Server</div><div class="mv"><?= !empty($tk['server']) ? h($tk['server']) : '<span style="color:var(--muted);font-weight:600">Không xác định</span>' ?></div></div>
-          <div><div class="ml">Người xử lý</div><div class="mv"><?= $tk['assignee']?'<img src="'.$sapi.'/avatar/'.urlencode($tk['assignee']).'/22" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'.h($tk['assignee']):'<span style="color:var(--muted);font-weight:600">Chưa nhận</span>' ?></div></div>
+          <div><div class="ml">Người xử lý</div><div class="mv"><?= $tk['assignee']?'<img src="'.$sapi.'/avatar/'.urlencode($tk['assignee']).'/22" data-skin-user="'.h($tk['assignee']).'" data-skin-size="22" onerror="skinFallback(this)" alt="">'.h($tk['assignee']):'<span style="color:var(--muted);font-weight:600">Chưa nhận</span>' ?></div></div>
           <div><div class="ml">Ngày tạo</div><div class="mv" style="font-weight:600"><?=date('d/m/Y H:i',(int)($tk['created']/1000))?></div></div>
         </div>
       </div>
 
       <div class="thread">
       <?php foreach($reps as $rp){ $staff=$rp['is_staff']; $attHtml = tk_render_atts($rp['attachments'] ?? null);
-        echo '<div class="msg'.($staff?' staff':'').'"><img src="'.$sapi.'/avatar/'.urlencode($rp['username']).'/40" onerror="this.onerror=null;this.src=\'?img=doge\'" alt=""><div class="mb"><div class="mu">'.h($rp['username']).($staff?'<span class="adm-badge">ADMIN</span>':'').'<span class="mtime">'.date('d/m/Y H:i',(int)($rp['created']/1000)).'</span></div><div class="mc">'.nl2br(h($rp['message'])).'</div>'.$attHtml.'</div></div>';
+        echo '<div class="msg'.($staff?' staff':'').'"><img src="'.$sapi.'/avatar/'.urlencode($rp['username']).'/40" data-skin-user="'.h($rp['username']).'" data-skin-size="40" onerror="skinFallback(this)" alt=""><div class="mb"><div class="mu">'.h($rp['username']).($staff?'<span class="adm-badge">ADMIN</span>':'').'<span class="mtime">'.date('d/m/Y H:i',(int)($rp['created']/1000)).'</span></div><div class="mc">'.nl2br(h($rp['message'])).'</div>'.$attHtml.'</div></div>';
       } ?>
       </div>
 
@@ -3944,6 +3944,25 @@ else { http_response_code(404); echo '<div class="phead"><h1>404</h1><p>Trang kh
 <script>
 const SERVER_IP=<?=json_encode($CFG['server_ip'])?>;
 addEventListener('scroll',()=>document.getElementById('hdr').classList.toggle('sc',scrollY>20));
+/* Skin avatar fallback chain. Một số mạng / vị trí địa lý chặn mc-heads.net, hoặc
+   người chơi không có tài khoản Mojang (offline-mode) — thử lần lượt các service
+   khác trước khi chịu hiển thị icon doge. */
+function skinFallback(img){
+  try{
+    const tries = parseInt(img.dataset.skinT||'0',10);
+    // Đoán username từ URL hiện tại — các service đều dùng /avatar/<name>/ hoặc /helm/<name>/.
+    let user = img.dataset.skinUser||'';
+    if(!user){ const m = (img.src||'').match(/\/(?:avatar|helm|face|head)s?\/([^\/?&]+)/); if(m) user = decodeURIComponent(m[1]); }
+    const size = img.dataset.skinSize || (img.width|0) || 40;
+    const chain = [
+      'https://minotar.net/helm/'+encodeURIComponent(user)+'/'+size+'.png',
+      'https://crafatar.com/avatars/'+encodeURIComponent(user)+'?size='+size+'&overlay',
+      '?img=doge'
+    ];
+    if(tries < chain.length){ img.dataset.skinT = tries+1; img.src = chain[tries]; }
+    else { img.onerror = null; img.src = '?img=doge'; }
+  }catch(e){ img.onerror = null; img.src = '?img=doge'; }
+}
 let tT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(tT);tT=setTimeout(()=>t.classList.remove('show'),2600)}
 function copyIp(n){const b=document.getElementById('cp'+(n||''));const d=()=>{if(b){b.classList.add('done');b.textContent='Đã chép';setTimeout(()=>{b.classList.remove('done');b.textContent='Sao chép'},1800)}toast('Đã sao chép IP: '+SERVER_IP)};navigator.clipboard?navigator.clipboard.writeText(SERVER_IP).then(d).catch(d):d()}
 function showFiles(input, wrapId){
@@ -4041,7 +4060,7 @@ window.DGL={csrf:<?=json_encode($CSRF)?>,user:<?=json_encode($user)?>,admin:<?=$
     amsgs.innerHTML=chatCache.map(function(m){
       if(m.kind==='system') return '<div class="achat-sys">'+esc(m.message)+'</div>';
       var mine=(m.username||'').toLowerCase()===(D.user||'').toLowerCase();
-      return '<div class="achat-row'+(mine?' me':'')+'"><img src="'+avatar(m.username,30)+'" onerror="this.onerror=null;this.src=\'?img=doge\'"><div class="achat-bub"><b>'+esc(m.username)+'</b><span>'+esc(m.message)+'</span></div></div>';
+      return '<div class="achat-row'+(mine?' me':'')+'"><img src="'+avatar(m.username,30)+'" data-skin-user="'+esc(m.username)+'" data-skin-size="30" onerror="skinFallback(this)"><div class="achat-bub"><b>'+esc(m.username)+'</b><span>'+esc(m.message)+'</span></div></div>';
     }).join('');
     amsgs.scrollTop=amsgs.scrollHeight;
   }

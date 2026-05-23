@@ -2496,9 +2496,6 @@ html,body{overflow-x:hidden}
       <?php foreach($nav as $n){ $act_on = ($p===$n[0]) || ($n[0]==='shop' && in_array($p,$SHOP_PAGES,true)); $cls=($act_on?' class="on"':''); echo '<a href="?p='.$n[0].'"'.$cls.'>'.$n[1].'</a>'; } ?>
     </div>
     <div class="ncta">
-      <div class="nsoc">
-        <?php foreach(($CFG['socials']??[]) as $k=>$u){ if(!$u) continue; echo '<a class="nsoc-a '.h($k).'" href="'.h($u).'" target="_blank" rel="noopener" aria-label="'.h($k).'">'.ic($k).'</a>'; } ?>
-      </div>
       <?php if($user){ $w=wallet($user); $av=$CFG['skin_api'].'/avatar/'.urlencode($user).'/'; ?>
         <div class="ndrop" id="ndrop">
           <button class="nbell" id="nbell" type="button" aria-label="Thông báo" onclick="toggleNotif()">

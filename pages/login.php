@@ -9,8 +9,9 @@
       <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="login">
       <div class="field"><label>Tên tài khoản (IGN)</label><input name="username" placeholder="VD: DogeMaster99" required></div>
       <div class="field"><label>Mật khẩu</label><input name="password" type="password" placeholder="••••••••" required></div>
+      <label class="rmbline"><input type="checkbox" name="remember" value="1"> <span>Ghi nhớ tài khoản này trong 60 ngày</span></label>
       <button class="btn btn-green btn-block" type="submit">Đăng nhập</button>
     </form>
-    <div class="aalt"><a href="#" onclick="toast('Liên hệ Admin để khôi phục mật khẩu');return false">Quên mật khẩu?</a></div>
+    <div class="aalt"><a href="?p=forgot">Quên mật khẩu?</a></div>
     <div class="afoot">Chưa có tài khoản? <a href="?p=register">Đăng ký ngay</a></div>
   </div></div></section>

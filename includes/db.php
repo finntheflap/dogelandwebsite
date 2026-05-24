@@ -87,6 +87,32 @@ function db(){
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN ban_reason VARCHAR(190) NOT NULL DEFAULT ''"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN banned_by VARCHAR(64) NOT NULL DEFAULT ''"); }catch(Exception $e){}
   try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN banned_at BIGINT NOT NULL DEFAULT 0"); }catch(Exception $e){}
+  try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN ban_until BIGINT NOT NULL DEFAULT 0"); }catch(Exception $e){}
+  try{ $pdo->exec("ALTER TABLE web_wallet ADD COLUMN ban_ip VARCHAR(64) NOT NULL DEFAULT ''"); }catch(Exception $e){}
+  /* Login history (web logins; plugin có thể bổ sung 'game' type sau) */
+  $pdo->exec("CREATE TABLE IF NOT EXISTS web_login_log(
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(64) NOT NULL,
+    type VARCHAR(8) NOT NULL DEFAULT 'web',
+    server_id VARCHAR(32) NOT NULL DEFAULT '',
+    ip VARCHAR(64) NOT NULL DEFAULT '',
+    ua VARCHAR(255) NOT NULL DEFAULT '',
+    success TINYINT NOT NULL DEFAULT 1,
+    created BIGINT NOT NULL,
+    KEY k_user_created(username, created)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+  /* Remember-me tokens: selector lookup + sha256(validator) check (avoids timing attacks) */
+  $pdo->exec("CREATE TABLE IF NOT EXISTS web_remember_tokens(
+    selector CHAR(16) PRIMARY KEY,
+    username VARCHAR(64) NOT NULL,
+    validator_hash CHAR(64) NOT NULL,
+    expires BIGINT NOT NULL,
+    created BIGINT NOT NULL,
+    last_used BIGINT NOT NULL DEFAULT 0,
+    ip VARCHAR(64) NOT NULL DEFAULT '',
+    ua VARCHAR(255) NOT NULL DEFAULT '',
+    KEY k_user(username), KEY k_expires(expires)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_shop(
     id INT AUTO_INCREMENT PRIMARY KEY, category VARCHAR(8) NOT NULL DEFAULT 'item',
     name VARCHAR(120) NOT NULL, price INT NOT NULL DEFAULT 0, color VARCHAR(16) NOT NULL DEFAULT '#888888',
@@ -132,6 +158,9 @@ function db(){
     }catch(Exception $e){}
   }
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_admins(username VARCHAR(64) PRIMARY KEY, granted_by VARCHAR(64), created BIGINT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+  /* 3-role system: support / admin / supervisor. Supervisor = highest (replaces Owner). */
+  try{ $pdo->exec("ALTER TABLE web_admins ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'admin' AFTER username"); }catch(Exception $e){}
+  try{ $pdo->exec("ALTER TABLE web_admins ADD COLUMN console TINYINT NOT NULL DEFAULT 0"); }catch(Exception $e){}
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_comments(id INT AUTO_INCREMENT PRIMARY KEY, post_id INT NOT NULL, username VARCHAR(64) NOT NULL, content TEXT NOT NULL, created BIGINT NOT NULL, KEY k_post(post_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_tickets(id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(64) NOT NULL, subject VARCHAR(180) NOT NULL, category VARCHAR(48) NOT NULL DEFAULT 'Khác', server VARCHAR(48) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'open', assignee VARCHAR(64) NULL, created BIGINT NOT NULL, updated BIGINT NOT NULL, KEY k_user(username)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
   $pdo->exec("CREATE TABLE IF NOT EXISTS web_ticket_replies(id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT NOT NULL, username VARCHAR(64) NOT NULL, message TEXT NOT NULL, attachments TEXT NULL, is_staff TINYINT NOT NULL DEFAULT 0, created BIGINT NOT NULL, KEY k_t(ticket_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");

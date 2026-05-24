@@ -53,7 +53,7 @@ if($IS_ADMIN) $nav[]=['admin','Quản trị'];
         <div class="udrop">
           <button class="uchip" onclick="document.getElementById('udd').classList.toggle('on')"><img src="<?=h($av)?>30" data-skin-user="<?=h($user)?>" data-skin-size="30" onerror="skinFallback(this)" alt=""><span class="un"><?=h($user)?></span><span class="car">▾</span></button>
           <div class="udd <?= $IS_ADMIN?'isadmin':'' ?>" id="udd">
-            <div class="uhead"><img src="<?=h($av)?>48" data-skin-user="<?=h($user)?>" data-skin-size="48" onerror="skinFallback(this)" alt=""><div><div class="un2"><?=h($user)?></div><div class="urole <?= is_owner($user)?'owner':($IS_ADMIN?'adm':'') ?>"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div></div>
+            <div class="uhead"><img src="<?=h($av)?>48" data-skin-user="<?=h($user)?>" data-skin-size="48" onerror="skinFallback(this)" alt=""><div><div class="un2"><?=h($user)?></div><div class="urole <?= is_supervisor($user)?'owner':($IS_ADMIN?'adm':'') ?>"><?= is_supervisor($user)?'Supervisor':(function_exists('user_role')&&user_role($user)?role_label(user_role($user)):'Người chơi') ?></div></div></div>
             <div class="ubal"><span class="dgc"><span class="wd"></span> <?=doge_short(doge_balance($user))?></span><a href="?p=topup" class="ubal-top">+ Nạp</a></div>
             <form class="giftmini" method="post" action="?p=profile">
               <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="gift_redeem"><input type="hidden" name="from" value="<?=h($p)?>">
@@ -69,7 +69,6 @@ if($IS_ADMIN) $nav[]=['admin','Quản trị'];
             <a href="?p=admin&tab=dash">Admin Mode</a>
             <a href="?p=admin&tab=tickets">Hộp ticket<?php if($oc) echo '<span class="badge2">'.$oc.'</span>'; ?></a>
             <a href="?p=admin&tab=announce">Thông báo khẩn</a>
-            <?php if(is_owner($user)) echo '<a href="?p=admin&tab=staff">Phân quyền admin</a>'; ?>
             <?php } ?>
             <div class="usep"></div>
             <a href="?p=logout" class="lo">Đăng xuất</a>
@@ -91,3 +90,18 @@ if($IS_ADMIN) $nav[]=['admin','Quản trị'];
     </div>
   </div>
 </header>
+
+<?php
+  /* Thông báo khẩn banner — luôn hiển thị nếu có thông báo active */
+  $__ann = function_exists('active_announce') ? active_announce() : null;
+  if ($__ann) {
+    $__lvl = $__ann['level'] ?? 'warn';
+    $__ico = ['info'=>'ℹ️','warn'=>'⚠️','danger'=>'🔴'][$__lvl] ?? '⚠️';
+    echo '<div class="annbanner ann-'.h($__lvl).'">'
+        .'<div class="wrap" style="display:flex;align-items:center;gap:12px">'
+        .'<span class="ann-ico">'.$__ico.'</span>'
+        .'<div class="ann-msg">'.h($__ann['message']).'</div>'
+        .($__ann['expires']?'<span class="ann-exp sub2">hết hạn '.date('d/m H:i',(int)($__ann['expires']/1000)).'</span>':'')
+        .'</div></div>';
+  }
+?>

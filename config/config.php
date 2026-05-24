@@ -54,7 +54,7 @@ $CFG = [
   // --- Admin cố định ban đầu (tuỳ chọn). Quyền admin chính do owner cấp. ---
   'admins' => [],
   // --- Các chế độ chơi (kho đồ hiển thị theo từng mode) ---
-  'modes' => ['towny'=>'Towny','sdo'=>'Sword Dark Online','survival'=>'Sinh Tồn'],
+  'modes' => ['lobby'=>'Lobby','sdo'=>'Sword Dark Online','towny'=>'RPG Towny Survival','skyblock'=>'Skyblock'],
   // --- Render skin Minecraft (mc-heads.net dùng được theo tên, miễn phí) ---
   'skin_api' => 'https://mc-heads.net',
   // --- Discord OAuth2 (điền để bật "Xác thực Discord"). Tạo app tại
@@ -91,8 +91,8 @@ $CFG = [
   'ticket_categories' => ['Báo lỗi server','Nạp thẻ / Thanh toán','Vật phẩm in-game','Báo cáo người chơi','Mất đồ','Tố cáo','Tài khoản','Góp ý','Khác'],
 
   // --- Upload file đính kèm ticket ---
-  'upload_dir'       => __DIR__.'/uploads/tickets', // thư mục lưu file (sẽ tự tạo)
-  'upload_url'       => 'uploads/tickets',          // URL prefix (tương đối với index.php)
+  'upload_dir'       => __DIR__.'/../uploads/tickets', // ở web root (tránh /config/ bị Apache chặn)
+  'upload_url'       => 'uploads/tickets',             // URL prefix (tương đối với index.php)
   'upload_max_mb'    => 25,                          // dung lượng tối đa / file (MB)
   'upload_max_files' => 8,                           // số file tối đa / tin nhắn
   'upload_image_ext' => ['jpg','jpeg','png','gif','webp','avif','bmp'],

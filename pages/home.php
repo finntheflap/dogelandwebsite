@@ -22,6 +22,36 @@
   </section>
 
   <section><div class="wrap">
+    <?php $homeServers = function_exists('get_servers_status') ? get_servers_status(true) : []; ?>
+    <?php if($homeServers){ ?>
+    <div class="shead"><div class="k">Mạng máy chủ</div><h2><?=count($homeServers)?> server đang mở</h2><p>Trạng thái thời gian thực — đồng bộ qua plugin DogelandSync.</p></div>
+    <div class="srvgrid">
+      <?php foreach($homeServers as $s){
+        $cls = $s['online'] ? 'on' : 'off';
+        $statusTxt = $s['online'] ? 'Online' : 'Offline';
+        $countTxt = $s['online'] ? (string)$s['count'] : '—';
+        $imgStyle = $s['image'] ? ' style="background-image:url('.h($s['image']).')"' : '';
+        $tagline = !empty($s['tagline']) ? '<div class="srvtag">'.h($s['tagline']).'</div>' : '';
+        $accentStyle = !empty($s['accent']) ? ' style="--srv-accent:'.h($s['accent']).'"' : '';
+        echo '<a class="srvcard '.$cls.'" href="?p=server&id='.h($s['id']).'"'.$accentStyle.'>
+                <div class="srvimg"'.$imgStyle.'></div>
+                <div class="srvhd">
+                  <span class="srvdot"></span>
+                  <h3>'.h($s['name']).'</h3>
+                  <span class="srvstatus">'.$statusTxt.'</span>
+                </div>
+                '.$tagline.'
+                <div class="srvbody">
+                  <div class="srvcount"><span class="num">'.h($countTxt).'</span><span class="lbl">Đang chơi</span></div>
+                  <span class="srvarrow">Khám phá →</span>
+                </div>
+              </a>';
+      } ?>
+    </div>
+    <?php } ?>
+  </div></section>
+
+  <section><div class="wrap">
     <div class="shead"><div class="k">Bảng tin</div><h2>Tin tức</h2><p>Sự kiện, thông báo và bản cập nhật mới nhất từ Dogeland Network.</p></div>
     <?php $posts=get_posts(['event','update','news'],12); if(!$posts) echo '<div class="empty">Chưa có bài viết nào.</div>'; else { echo '<div class="feed">'; foreach($posts as $po) echo post_card($po); echo '</div>'; echo '<div style="text-align:center;margin-top:22px"><a class="btn btn-ghost" href="?p=events">Xem tất cả →</a></div>'; } ?>
   </div></section>

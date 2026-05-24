@@ -12,7 +12,21 @@
   if($q!==''){ $where[]="(item LIKE ? OR seller LIKE ?)"; $args[]="%$q%"; $args[]="%$q%"; }
   $sql="SELECT * FROM web_auctions".($where?(' WHERE '.implode(' AND ',$where)):'')." ORDER BY (status='active') DESC, end_at ASC LIMIT 120";
   $aucs=[]; try{ $st=db()->prepare($sql); $st->execute($args); $aucs=$st->fetchAll(); }catch(Exception $e){}
-  $myInv=[]; if($user){ try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,item"); $is->execute([$user]); $myInv=$is->fetchAll(); }catch(Exception $e){} }
+  // Inventory grouped by server từ DogelandSync — chỉ server có trong config + locked=0
+  $myInvBySrv = [];
+  if ($user) {
+    $modes = $CFG['modes'] ?? [];
+    $validMs = array_keys($modes);
+    if ($validMs) {
+      try {
+        $ph = implode(',', array_fill(0, count($validMs), '?'));
+        $is = db()->prepare("SELECT * FROM web_inventory WHERE username=? AND mode IN ($ph) AND locked=0 ORDER BY mode, section, slot, id");
+        $is->execute(array_merge([$user], $validMs));
+        foreach ($is->fetchAll() as $r) $myInvBySrv[$r['mode']][] = $r;
+      } catch(Exception $e){}
+    }
+  }
+  $totalItems = array_sum(array_map('count', $myInvBySrv));
 ?>
   <div class="phead"><div class="k">Cửa hàng</div><h1>🔨 Đấu Giá</h1><p>Trả giá bằng <b style="color:#f7c948"><?=h($CFG['doge_label']??'Dogecoin')?></b> — người cao nhất khi hết giờ thắng. Mở phiên tốn <b><?=doge_short($fee)?></b> (hoàn lại nếu không ai đấu).</p>
     <?php if($user) echo '<div class="balbar">Số dư: <b class="dogechip">'.number_format($bal,0,',','.').'</b></div>'; ?>
@@ -24,20 +38,91 @@
 
     <?php if($user){ ?>
     <div class="sellbox">
-      <h3>🆕 Mở phiên đấu giá <span class="sub2" style="font-weight:600;font-size:.85rem">(lấy vật phẩm từ kho · phí <?=doge_short($fee)?>, hoàn nếu hết giờ không ai đấu)</span></h3>
-      <?php if(!$myInv) echo '<div class="sub2">Kho của bạn đang trống — không có gì để mở đấu giá.</div>';
-      else { ?>
-      <form method="post" action="?p=auction" class="sellgrid" onsubmit="return confirm('Mở phiên đấu giá? Sẽ tạm trừ <?=$fee?> <?=h($CFG['doge_label']??'Dogecoin')?> và giữ vật phẩm từ kho.')">
-        <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="auc_open">
-        <div class="field" style="grid-column:span 2"><label>Vật phẩm trong kho</label>
-          <select name="inv_id" required><?php foreach($myInv as $iv) echo '<option value="'.(int)$iv['id'].'">'.h($iv['item']).' ×'.(int)$iv['qty'].' ['.h($iv['mode']).']</option>'; ?></select>
+      <h3>🆕 Mở phiên đấu giá <span class="sub2" style="font-weight:600;font-size:.85rem">(chọn item từ kho thật · phí <?=doge_short($fee)?>, hoàn nếu hết giờ không ai đấu)</span></h3>
+      <?php if(!$totalItems){ ?>
+        <div class="sub2" style="padding:18px;background:rgba(255,255,255,.02);border-radius:10px;text-align:center">Kho thật của bạn đang trống. Vào game chơi để có item, plugin sẽ tự sync inv lên web.</div>
+      <?php } else { ?>
+
+      <!-- Server tabs (chọn server lấy item) -->
+      <div class="aucsrv-tabs">
+        <?php $first=true; foreach($myInvBySrv as $sid=>$items){
+          $sname = $modes[$sid] ?? $sid;
+          echo '<button type="button" class="aucsrv-tab'.($first?' on':'').'" data-srv="'.h($sid).'">'.h($sname).' <span class="aucsrv-c">'.count($items).'</span></button>';
+          $first=false;
+        } ?>
+      </div>
+
+      <!-- Item grid per server -->
+      <?php $first=true; foreach($myInvBySrv as $sid=>$items){ ?>
+        <div class="aucinv-pane<?=$first?' on':''?>" data-srv-pane="<?=h($sid)?>">
+          <div class="aucinv-grid">
+            <?php foreach($items as $it){
+              $img = item_img($it['image']??'', $it['item_key']??$it['material']??'');
+              $qty = (int)($it['qty']??1);
+              $displayName = $it['display_name'] ?? $it['item'] ?? $it['material'] ?? '?';
+              $cleanName = preg_replace('/§[0-9a-frlokmn]/i','',$displayName);
+              $enchants = $it['enchants'] ?? '';
+              $cls = 'aucinv-it'.($enchants?' has-ench':'');
+              echo '<button type="button" class="'.$cls.'" data-inv-id="'.(int)$it['id'].'" data-qty="'.$qty.'" data-name="'.h($cleanName).'" data-img="'.h($img).'" title="'.h($cleanName).' ×'.$qty.'">'
+                  .'<img src="'.h($img).'" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'
+                  .($qty>1?'<span class="aucinv-qy">'.$qty.'</span>':'')
+                  .'<span class="aucinv-nm">'.h(preg_replace('/_/',' ',strtolower($it['material']?:$cleanName))).'</span>'
+                  .'</button>';
+            } ?>
+          </div>
         </div>
-        <div class="field"><label>Số lượng</label><input name="qty" type="number" min="1" value="1" required></div>
-        <div class="field"><label>Giá khởi điểm</label><input name="start_price" type="number" min="1" value="100" required></div>
-        <div class="field"><label>Thời lượng (giờ)</label><input name="hours" type="number" min="0.5" step="0.5" value="24" required></div>
-        <div class="field"><button class="btn btn-gold btn-block" type="submit">Mở phiên</button></div>
+      <?php $first=false; } ?>
+
+      <!-- Form mở phiên (item đã chọn) -->
+      <form method="post" action="?p=auction" class="aucform" id="aucForm" onsubmit="return confirmAuc()">
+        <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="auc_open">
+        <input type="hidden" name="inv_id" id="aucInvId" value="">
+        <div class="aucform-preview" id="aucPreview"><span class="sub2">Click vào item để chọn →</span></div>
+        <div class="aucform-fields">
+          <label class="field"><span>Số lượng</span><input name="qty" id="aucQty" type="number" min="1" value="1" required></label>
+          <label class="field"><span>Giá khởi điểm (<?=h($CFG['doge_symbol']??'Ð')?>)</span><input name="start_price" type="number" min="1" value="100" required></label>
+          <label class="field"><span>Thời lượng (giờ)</span><input name="hours" type="number" min="0.5" step="0.5" value="24" required></label>
+          <button class="btn btn-gold" type="submit" id="aucSubmit" disabled>Mở phiên đấu giá</button>
+        </div>
       </form>
-      <p class="sub2" style="margin-top:10px">💡 Ảnh & icon vật phẩm lấy theo món bạn chọn trong kho (admin có thể gán ảnh riêng cho từng vật phẩm).</p>
+      <p class="sub2" style="margin-top:10px">💡 Item có ✨ là có enchant. Lock đảm bảo item không bị mất khi bạn join game lại (DogelandSync handle escrow).</p>
+
+      <script>
+      (function(){
+        const tabs = document.querySelectorAll('.aucsrv-tab');
+        const panes = document.querySelectorAll('.aucinv-pane');
+        const items = document.querySelectorAll('.aucinv-it');
+        const preview = document.getElementById('aucPreview');
+        const invId = document.getElementById('aucInvId');
+        const qtyIn = document.getElementById('aucQty');
+        const submitBtn = document.getElementById('aucSubmit');
+        let selectedName = '', selectedMaxQty = 1;
+        tabs.forEach(t=>t.addEventListener('click',()=>{
+          tabs.forEach(x=>x.classList.remove('on')); t.classList.add('on');
+          const sid = t.dataset.srv;
+          panes.forEach(p=>p.classList.toggle('on', p.dataset.srvPane===sid));
+          // Clear selection khi đổi server
+          items.forEach(i=>i.classList.remove('selected'));
+          invId.value=''; preview.innerHTML='<span class="sub2">Click vào item để chọn →</span>'; submitBtn.disabled=true;
+        }));
+        items.forEach(it=>it.addEventListener('click',()=>{
+          items.forEach(x=>x.classList.remove('selected'));
+          it.classList.add('selected');
+          invId.value = it.dataset.invId;
+          selectedName = it.dataset.name;
+          selectedMaxQty = parseInt(it.dataset.qty,10) || 1;
+          qtyIn.max = selectedMaxQty; qtyIn.value = Math.min(selectedMaxQty, parseInt(qtyIn.value,10)||1);
+          preview.innerHTML = '<img src="'+it.dataset.img+'" onerror="this.src=\'?img=doge\'" alt=""><div><div class="nm">'+selectedName+'</div><div class="sub2">Có '+selectedMaxQty+' trong kho — chọn số lượng đấu giá ≤ '+selectedMaxQty+'</div></div>';
+          submitBtn.disabled=false;
+        }));
+        window.confirmAuc = function(){
+          if (!invId.value) { alert('Chưa chọn item.'); return false; }
+          const q = parseInt(qtyIn.value,10);
+          if (q < 1 || q > selectedMaxQty) { alert('Số lượng phải từ 1 đến '+selectedMaxQty); return false; }
+          return confirm('Mở phiên đấu giá '+q+'× "'+selectedName+'"? Sẽ tạm trừ <?=$fee?> <?=h($CFG['doge_label']??'Dogecoin')?> và giữ item trong kho.');
+        };
+      })();
+      </script>
       <?php } ?>
     </div>
     <?php } ?>

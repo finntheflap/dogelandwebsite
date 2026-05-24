@@ -23,7 +23,7 @@
   <div class="fbot">© <?=date('Y')?> DOGELAND.VN — Không liên kết với Mojang / Microsoft.</div>
 </div></footer>
 
-<div class="toast" id="toast"></div>
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
 <script>
 const SERVER_IP=<?=json_encode($CFG['server_ip'])?>;
@@ -47,7 +47,20 @@ function skinFallback(img){
     else { img.onerror = null; img.src = '?img=doge'; }
   }catch(e){ img.onerror = null; img.src = '?img=doge'; }
 }
-let tT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(tT);tT=setTimeout(()=>t.classList.remove('show'),2600)}
+function toast(msg,type){
+  type=type||'info';
+  const stack=document.getElementById('toastStack'); if(!stack) return;
+  const ic={ok:'✅',error:'⚠️',info:'ℹ️'}[type]||'ℹ️';
+  const el=document.createElement('div'); el.className='t-item t-'+type;
+  el.innerHTML='<span class="t-ico"></span><span class="t-msg"></span><button type="button" class="t-x" aria-label="Đóng">×</button>';
+  el.querySelector('.t-ico').textContent=ic;
+  el.querySelector('.t-msg').textContent=msg;
+  let to; const hide=()=>{ clearTimeout(to); el.classList.add('hide'); setTimeout(()=>el.remove(),400); };
+  el.querySelector('.t-x').onclick=hide;
+  stack.appendChild(el);
+  requestAnimationFrame(()=>el.classList.add('show'));
+  to=setTimeout(hide, type==='error'?6000:4500);
+}
 function copyIp(n){const b=document.getElementById('cp'+(n||''));const d=()=>{if(b){b.classList.add('done');b.textContent='Đã chép';setTimeout(()=>{b.classList.remove('done');b.textContent='Sao chép'},1800)}toast('Đã sao chép IP: '+SERVER_IP)};navigator.clipboard?navigator.clipboard.writeText(SERVER_IP).then(d).catch(d):d()}
 function showFiles(input, wrapId){
   const w = document.getElementById(wrapId); if(!w) return;
@@ -77,6 +90,19 @@ function invTab(el){document.querySelectorAll('.invtab').forEach(t=>t.classList.
 function fmtCD(ms){let s=Math.floor(ms/1000);if(s<=0)return null;const d=Math.floor(s/86400);s-=d*86400;const h=Math.floor(s/3600);s-=h*3600;const m=Math.floor(s/60);const ss=s-m*60;const p=n=>String(n).padStart(2,'0');return (d>0?d+'n ':'')+p(h)+':'+p(m)+':'+p(ss)}
 function tickCD(){document.querySelectorAll('.tm[data-end]').forEach(el=>{const t=fmtCD((+el.dataset.end)-Date.now());if(t===null){el.textContent='Đã kết thúc';el.classList.add('ended');const b=el.closest('.auc')?.querySelector('button');if(b){b.disabled=true;b.style.opacity=.5;b.textContent='Đã kết thúc'}}else el.textContent='⏱ '+t})}
 if(document.querySelector('.tm[data-end]')){tickCD();setInterval(tickCD,1000)}
+
+/* Render PHP flash() messages thành toast (auto-fire khi page load) */
+<?php
+$__flashes = function_exists('flash') ? flash() : [];
+foreach ($__flashes as $__f) {
+  $__type = $__f[0] ?? 'info';
+  if ($__type === 'devlink') continue;
+  if (!in_array($__type, ['ok','error','info'], true)) $__type = 'info';
+  $__msg = (string)($__f[1] ?? '');
+  if ($__msg === '') continue;
+  echo 'toast(' . json_encode($__msg, JSON_UNESCAPED_UNICODE) . ',' . json_encode($__type) . ");\n";
+}
+?>
 </script>
 
 <?php if($user){ ?>

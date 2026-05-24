@@ -28,9 +28,20 @@
       </div>
 
       <div class="thread">
-      <?php foreach($reps as $rp){ $staff=$rp['is_staff']; $attHtml = tk_render_atts($rp['attachments'] ?? null);
-        echo '<div class="msg'.($staff?' staff':'').'"><img src="'.$sapi.'/avatar/'.urlencode($rp['username']).'/40" data-skin-user="'.h($rp['username']).'" data-skin-size="40" onerror="skinFallback(this)" alt=""><div class="mb"><div class="mu">'.h($rp['username']).($staff?'<span class="adm-badge">ADMIN</span>':'').'<span class="mtime">'.date('d/m/Y H:i',(int)($rp['created']/1000)).'</span></div><div class="mc">'.nl2br(h($rp['message'])).'</div>'.$attHtml.'</div></div>';
-      } ?>
+      <?php
+        $roleBadgeColors = ['supervisor'=>'#ff8db0','admin'=>'#7dd47f','support'=>'#8fb4ff'];
+        foreach($reps as $rp){
+          $staff=$rp['is_staff']; $attHtml = tk_render_atts($rp['attachments'] ?? null);
+          $badge = ''; $roleCls = '';
+          if($staff){
+            $rRole = user_role($rp['username']);
+            $rLbl  = strtoupper(role_label($rRole));
+            $rCol  = $roleBadgeColors[$rRole] ?? '#7dd47f';
+            $badge = '<span class="adm-badge" style="background:'.$rCol.';color:#1a1d22">'.$rLbl.'</span>';
+            $roleCls = ' role-'.($rRole ?: 'admin');
+          }
+          echo '<div class="msg'.($staff?' staff':'').$roleCls.'"><img src="'.$sapi.'/avatar/'.urlencode($rp['username']).'/40" data-skin-user="'.h($rp['username']).'" data-skin-size="40" onerror="skinFallback(this)" alt=""><div class="mb"><div class="mu">'.h($rp['username']).$badge.'<span class="mtime">'.date('d/m/Y H:i',(int)($rp['created']/1000)).'</span></div><div class="mc">'.nl2br(h($rp['message'])).'</div>'.$attHtml.'</div></div>';
+        } ?>
       </div>
 
       <?php if($tk['status']!=='closed'){ ?>

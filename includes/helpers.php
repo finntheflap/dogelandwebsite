@@ -12,13 +12,22 @@ function csrf_ok(){ return isset($_POST['csrf'],$_SESSION['csrf']) && hash_equal
 function flash($m=null){ if($m!==null){ $_SESSION['flash'][]=$m; return; } $f=$_SESSION['flash']??[]; $_SESSION['flash']=[]; return $f; }
 function redirect($p){ header('Location: ?p='.$p); exit; }
 function ms(){ return (int) round(microtime(true)*1000); }
+/* Supervisor = role cao nhất (cấp quyền, banned admin khác). Default = config 'owner'. */
 function is_owner($u){ global $CFG; return $u && strtolower($u)===strtolower($CFG['owner']??''); }
-function is_admin($u){
-  global $CFG; if(!$u) return false;
-  if(is_owner($u)) return true;
-  if(in_array(strtolower($u),array_map('strtolower',$CFG['admins']??[]),true)) return true;
-  try{ $st=db()->prepare("SELECT 1 FROM web_admins WHERE LOWER(username)=? LIMIT 1"); $st->execute([strtolower($u)]); return (bool)$st->fetch(); }catch(Exception $e){ return false; }
+function is_supervisor($u){ return is_owner($u) || user_role($u)==='supervisor'; }
+/* Lấy role hiện tại của user: 'supervisor' (owner config), 'admin', 'support', hoặc '' (player thường). */
+function user_role($u){
+  global $CFG; if(!$u) return '';
+  if(is_owner($u)) return 'supervisor';
+  if(in_array(strtolower($u),array_map('strtolower',$CFG['admins']??[]),true)) return 'admin';
+  try{ $st=db()->prepare("SELECT role FROM web_admins WHERE LOWER(username)=? LIMIT 1"); $st->execute([strtolower($u)]);
+    $r=$st->fetch(); return $r ? ($r['role'] ?: 'admin') : '';
+  }catch(Exception $e){ return ''; }
 }
+function role_label($role){
+  return ['supervisor'=>'Supervisor','admin'=>'Admin','support'=>'Support'][$role] ?? 'Player';
+}
+function is_admin($u){ return user_role($u) !== ''; }
 function verify_row($u){
   $blank=['username'=>$u,'phone'=>'','phone_verified'=>0,'phone_code'=>'','discord_id'=>'','discord_name'=>'','discord_verified'=>0];
   try{ $st=db()->prepare("SELECT * FROM web_verify WHERE username=?"); $st->execute([$u]); $r=$st->fetch();
@@ -36,11 +45,17 @@ function rcon_arg($s,$max=32){ $s=preg_replace('/[^A-Za-z0-9_]/','', (string)$s)
 function rcon_text($s,$max=120){ $s=preg_replace('/[\r\n\x00"`;]/',' ',(string)$s); return mb_substr_safe(trim($s),0,$max); }
 /* Queue 1 lệnh RCON. Defense in depth: ngay cả khi caller quên sanitize, hàm này
    vẫn loại CR/LF/null & cắt 250 ký tự (khớp với cột VARCHAR(255)). */
-function rcon_queue($command,$by){
+function rcon_queue($command,$by,$serverId=''){
   $command=preg_replace('/[\r\n\x00]+/',' ',(string)$command);
   $command=mb_substr_safe(trim($command),0,250);
   if($command==='') return;
-  try{ db()->prepare("INSERT INTO web_rcon_queue(command,requested_by,status,created) VALUES(?,?, 'pending',?)")->execute([$command,$by,ms()]); }catch(Exception $e){}
+  try{ db()->prepare("INSERT INTO web_rcon_queue(command,server_id,requested_by,status,created) VALUES(?,?,?, 'pending',?)")->execute([$command,$serverId,$by,ms()]); }catch(Exception $e){}
+}
+/* Queue 1 lệnh cho TẤT CẢ server trong $CFG['modes'] — dùng cho ban/unban/announce. */
+function rcon_queue_all($command,$by){
+  global $CFG;
+  $n=0; foreach(($CFG['modes']??[]) as $sid=>$_){ rcon_queue($command,$by,$sid); $n++; }
+  return $n;
 }
 function mb_substr_safe($s,$a,$b){ return function_exists('mb_substr')?mb_substr($s,$a,$b,'UTF-8'):substr($s,$a,$b); }
 function discord_notify($content){

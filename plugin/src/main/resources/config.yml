@@ -1,0 +1,57 @@
+# DogelandSync — bridge inventory Minecraft → web dogeland.vn
+# Đặt file này tại: <server>/plugins/DogelandSync/config.yml
+
+# Định danh server này. PHẢI khớp với key trong $CFG['modes'] của web (config.php).
+# Ví dụ: 'towny', 'sdo', 'survival'.
+# Toàn bộ row inventory plugin ghi xuống sẽ có mode = giá trị này.
+server-id: towny
+
+database:
+  # Mặc định trùng với web (cùng máy XAMPP). Đổi nếu plugin chạy server khác.
+  host: localhost
+  port: 3306
+  name: minecraft
+  user: root
+  password: ""
+  # Hikari pool — không cần đụng trừ khi server đông
+  pool-size: 6
+  connection-timeout-ms: 5000
+
+sync:
+  # Snapshot toàn bộ inv khi player join/quit (luôn nên bật)
+  on-join: true
+  on-quit: true
+  # Snapshot khi player đóng inventory GUI (drag/drop, chest, crafting...)
+  on-inventory-close: true
+  # Snapshot định kỳ mỗi N giây (0 = tắt). Khuyến nghị 60-120s cho server đông.
+  periodic-seconds: 90
+  # Debounce: nếu nhiều event dồn dập với cùng 1 player thì chỉ ghi 1 lần
+  debounce-ms: 1500
+
+action-queue:
+  # Poll bảng web_inv_actions mỗi N ms. 1500-2000 là sweet spot.
+  poll-interval-ms: 1500
+  # Số action xử lý mỗi tick poll (tránh nghẽn nếu queue dồn)
+  batch-size: 16
+
+# Stats per-server (top page tabs) — batch upsert mỗi N ticks (20=1s, 600=30s).
+stats:
+  enabled: true
+  period-ticks: 600          # 30s
+
+# RCON consumer — đọc lệnh từ web admin → exec console MC.
+rcon-consumer:
+  enabled: true
+  period-ticks: 20           # 1s
+
+# Live console stream — log4j2 appender → web_server_log → admin SSE viewer.
+console-log:
+  enabled: true
+
+# Inventory history backup — snapshot định kỳ vào web_inventory_history (rollback safety).
+# Web side tự cap 50 snapshot/player + TTL 30 ngày (xem includes/inv_safety.php).
+inventory-history:
+  period-minutes: 30          # 0 = tắt; 30 = mỗi 30 phút snapshot cho online players
+
+# Bật log chi tiết khi debug
+verbose: false

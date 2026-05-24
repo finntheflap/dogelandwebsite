@@ -8,7 +8,21 @@
   if($q!==''){ $where[]="(item_name LIKE ? OR seller LIKE ? OR description LIKE ?)"; $args[]="%$q%"; $args[]="%$q%"; $args[]="%$q%"; }
   $sql="SELECT * FROM web_market WHERE ".implode(' AND ',$where)." ORDER BY created DESC LIMIT 120";
   $listings=[]; try{ $st=db()->prepare($sql); $st->execute($args); $listings=$st->fetchAll(); }catch(Exception $e){}
-  $myInv=[]; if($user){ try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,item"); $is->execute([$user]); $myInv=$is->fetchAll(); }catch(Exception $e){} }
+  // Inventory grouped by server từ DogelandSync — chỉ server trong config + locked=0
+  $myInvBySrv = [];
+  if ($user) {
+    $modes = $CFG['modes'] ?? [];
+    $validMs = array_keys($modes);
+    if ($validMs) {
+      try {
+        $ph = implode(',', array_fill(0, count($validMs), '?'));
+        $is = db()->prepare("SELECT * FROM web_inventory WHERE username=? AND mode IN ($ph) AND locked=0 ORDER BY mode, section, slot, id");
+        $is->execute(array_merge([$user], $validMs));
+        foreach ($is->fetchAll() as $r) $myInvBySrv[$r['mode']][] = $r;
+      } catch(Exception $e){}
+    }
+  }
+  $totalItems = array_sum(array_map('count', $myInvBySrv));
 ?>
   <div class="phead"><div class="k">Cửa hàng</div><h1>🛒 Chợ Trời</h1><p>Người chơi mua bán trực tiếp bằng <b style="color:#f7c948"><?=h($CFG['doge_label']??'Dogecoin')?></b>. Server thu phí <b><?=$fp?>%</b> mỗi giao dịch.</p>
     <?php if($user) echo '<div class="balbar">Số dư: <b class="dogechip">'.number_format($bal,0,',','.').'</b></div>'; ?>
@@ -20,20 +34,90 @@
 
     <?php if($user){ ?>
     <div class="sellbox">
-      <h3>🏷️ Đăng bán vật phẩm <span class="sub2" style="font-weight:600;font-size:.85rem">(lấy từ kho của bạn · phí <?=$fp?>% khi bán được)</span></h3>
-      <?php if(!$myInv) echo '<div class="sub2">Kho của bạn đang trống — không có gì để bán.</div>';
-      else { ?>
-      <form method="post" action="?p=market" class="sellgrid">
-        <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="market_list">
-        <div class="field" style="grid-column:span 2"><label>Vật phẩm trong kho</label>
-          <select name="inv_id" required><?php foreach($myInv as $iv) echo '<option value="'.(int)$iv['id'].'">'.h($iv['item']).' ×'.(int)$iv['qty'].' ['.h($iv['mode']).']</option>'; ?></select>
+      <h3>🏷️ Đăng bán vật phẩm <span class="sub2" style="font-weight:600;font-size:.85rem">(chọn item từ kho thật · phí <?=$fp?>% khi bán được)</span></h3>
+      <?php if(!$totalItems){ ?>
+        <div class="sub2" style="padding:18px;background:rgba(255,255,255,.02);border-radius:10px;text-align:center">Kho thật của bạn đang trống. Vào game chơi để có item, plugin sẽ tự sync inv lên web.</div>
+      <?php } else { ?>
+
+      <!-- Server tabs -->
+      <div class="aucsrv-tabs">
+        <?php $first=true; foreach($myInvBySrv as $sid=>$items){
+          $sname = $modes[$sid] ?? $sid;
+          echo '<button type="button" class="aucsrv-tab'.($first?' on':'').'" data-srv="'.h($sid).'">'.h($sname).' <span class="aucsrv-c">'.count($items).'</span></button>';
+          $first=false;
+        } ?>
+      </div>
+
+      <!-- Item grid per server -->
+      <?php $first=true; foreach($myInvBySrv as $sid=>$items){ ?>
+        <div class="aucinv-pane<?=$first?' on':''?>" data-srv-pane="<?=h($sid)?>">
+          <div class="aucinv-grid">
+            <?php foreach($items as $it){
+              $img = item_img($it['image']??'', $it['item_key']??$it['material']??'');
+              $qty = (int)($it['qty']??1);
+              $displayName = $it['display_name'] ?? $it['item'] ?? $it['material'] ?? '?';
+              $cleanName = preg_replace('/§[0-9a-frlokmn]/i','',$displayName);
+              $enchants = $it['enchants'] ?? '';
+              $cls = 'aucinv-it'.($enchants?' has-ench':'');
+              echo '<button type="button" class="'.$cls.'" data-inv-id="'.(int)$it['id'].'" data-qty="'.$qty.'" data-name="'.h($cleanName).'" data-img="'.h($img).'" title="'.h($cleanName).' ×'.$qty.'">'
+                  .'<img src="'.h($img).'" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">'
+                  .($qty>1?'<span class="aucinv-qy">'.$qty.'</span>':'')
+                  .'<span class="aucinv-nm">'.h(preg_replace('/_/',' ',strtolower($it['material']?:$cleanName))).'</span>'
+                  .'</button>';
+            } ?>
+          </div>
         </div>
-        <div class="field"><label>Số lượng bán</label><input name="qty" type="number" min="1" value="1" required></div>
-        <div class="field"><label>Icon (mã item)</label><input name="item_key" list="itemkeys" value="diamond" placeholder="diamond"></div>
-        <div class="field"><label>Giá (<?=h($CFG['doge_label']??'Dogecoin')?>)</label><input name="price" type="number" min="1" value="100" required></div>
-        <div class="field" style="grid-column:span 2"><label>Mô tả (tuỳ chọn)</label><input name="description" maxlength="255" placeholder="VD: enchant Sắc bén V, độ bền cao…"></div>
-        <div class="field"><button class="btn btn-gold btn-block" type="submit">Đăng bán</button></div>
+      <?php $first=false; } ?>
+
+      <!-- Form đăng bán -->
+      <form method="post" action="?p=market" class="aucform" id="mkForm" onsubmit="return confirmMk()">
+        <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="market_list">
+        <input type="hidden" name="inv_id" id="mkInvId" value="">
+        <div class="aucform-preview" id="mkPreview"><span class="sub2">Click vào item để chọn →</span></div>
+        <div class="aucform-fields" style="grid-template-columns:1fr 1fr 2fr auto">
+          <label class="field"><span>Số lượng</span><input name="qty" id="mkQty" type="number" min="1" value="1" required></label>
+          <label class="field"><span>Giá (<?=h($CFG['doge_symbol']??'Ð')?>)</span><input name="price" type="number" min="1" value="100" required></label>
+          <label class="field"><span>Mô tả (optional)</span><input name="description" maxlength="255" placeholder="vd: enchant Sắc bén V…"></label>
+          <button class="btn btn-gold" type="submit" id="mkSubmit" disabled>Đăng bán</button>
+        </div>
       </form>
+      <p class="sub2" style="margin-top:10px">💡 Item ✨ có enchant. Plugin lock item trong kho để tránh mất khi bạn join game (escrow). Khi có người mua, doge tự về ví bạn (-<?=$fp?>% phí sàn).</p>
+
+      <script>
+      (function(){
+        const tabs=document.querySelectorAll('.aucsrv-tab');
+        const panes=document.querySelectorAll('.aucinv-pane');
+        const items=document.querySelectorAll('.aucinv-it');
+        const preview=document.getElementById('mkPreview');
+        const invId=document.getElementById('mkInvId');
+        const qtyIn=document.getElementById('mkQty');
+        const submitBtn=document.getElementById('mkSubmit');
+        let selectedName='', selectedMaxQty=1;
+        tabs.forEach(t=>t.addEventListener('click',()=>{
+          tabs.forEach(x=>x.classList.remove('on')); t.classList.add('on');
+          const sid=t.dataset.srv;
+          panes.forEach(p=>p.classList.toggle('on', p.dataset.srvPane===sid));
+          items.forEach(i=>i.classList.remove('selected'));
+          invId.value=''; preview.innerHTML='<span class="sub2">Click vào item để chọn →</span>'; submitBtn.disabled=true;
+        }));
+        items.forEach(it=>it.addEventListener('click',()=>{
+          items.forEach(x=>x.classList.remove('selected'));
+          it.classList.add('selected');
+          invId.value=it.dataset.invId;
+          selectedName=it.dataset.name;
+          selectedMaxQty=parseInt(it.dataset.qty,10)||1;
+          qtyIn.max=selectedMaxQty; qtyIn.value=Math.min(selectedMaxQty, parseInt(qtyIn.value,10)||1);
+          preview.innerHTML='<img src="'+it.dataset.img+'" onerror="this.src=\'?img=doge\'" alt=""><div><div class="nm">'+selectedName+'</div><div class="sub2">Có '+selectedMaxQty+' trong kho — chọn số lượng ≤ '+selectedMaxQty+'</div></div>';
+          submitBtn.disabled=false;
+        }));
+        window.confirmMk=function(){
+          if(!invId.value){alert('Chưa chọn item.');return false;}
+          const q=parseInt(qtyIn.value,10);
+          if(q<1||q>selectedMaxQty){alert('Số lượng phải 1-'+selectedMaxQty);return false;}
+          return confirm('Đăng bán '+q+'× "'+selectedName+'"?');
+        };
+      })();
+      </script>
       <?php } ?>
     </div>
     <?php } ?>

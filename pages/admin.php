@@ -6,56 +6,145 @@
   else {
     $tab=$_GET['tab']??'dash'; $T=$CFG['authme_table'];
     // nhóm điều hướng (icon đơn giản bằng ký tự)
+    // 8 nhóm chính — rút gọn từ 13+ mục, mỗi nhóm có sub-tab logic liên quan.
     $groups=[
-      'Tổng quan'=>[['dash','Dashboard','▦']],
-      'Nội dung'=>[['posts','Bài viết & Tin tức','✎'],['announce','Thông báo khẩn','📢']],
-      'Người dùng'=>[['users','Quản lý người dùng','👤']],
-      'Kinh tế'=>[['topups','Nạp thẻ','💳'],['pricing','Giá nạp & Khuyến mãi','💱'],['gift','Gift Code','🎁'],['ranks','Mua Rank','🎖'],['auc','Đấu giá','🔨'],['market','Chợ Trời','🛒']],
-      'Hỗ trợ'=>[['tickets','Ticket hỗ trợ','🎫']],
-      'Hệ thống'=>[['logs','Nhật ký Admin','📜']],
+      'Dashboard'  => [['dash','Tổng quan','▦']],
+      'Bài viết'   => [['posts','Bài viết & Tin tức','✎'],['announce','Thông báo khẩn','📢']],
+      'Người dùng' => [['users','Quản lý user','👤']],
+      'Nạp tiền'   => [['topups','Giao dịch nạp','💳'],['pricing','Giá nạp & KM','💱'],['gift','Gift Code','🎁']],
+      'Shop'       => [['ranks','Mua Rank','🎖'],['auc','Đấu giá','🔨'],['market','Chợ Trời','🛒']],
+      'Ticket'     => [['tickets','Hỗ trợ player','🎫']],
+      'Server'     => [],
+      'Log'        => [['logs','Nhật ký Admin','📜']],
     ];
-    $groups['Hệ thống'][]=['staff','Phân quyền','🔑'];
+    if(can_console($user)) $groups['Server'][]=['console','Server Console','⌨'];
+    if(empty($groups['Server'])) unset($groups['Server']); // ẩn nhóm Server nếu không có sub-tab
     $titles=[]; foreach($groups as $gs) foreach($gs as $it) $titles[$it[0]]=$it[1];
     $oc=open_tickets();
 ?>
   <div class="adminmode">
     <div class="wrap"><div class="amshell">
       <div class="ammain">
-        <div class="amhead"><div><div class="k" style="margin:0">Admin Mode</div><h1 style="font-size:1.8rem;font-weight:800;line-height:1.1;margin-top:4px"><?=h($titles[$tab]??'Dashboard')?></h1></div><span class="amwho"><img src="<?=h($CFG['skin_api'])?>/avatar/<?=urlencode($user)?>/30" data-skin-user="<?=h($user)?>" data-skin-size="30" onerror="skinFallback(this)" alt=""><?=h($user)?> · <?= is_owner($user)?'Owner':'Admin' ?></span></div>
+        <div class="amhead"><div><div class="k" style="margin:0">Admin Mode</div><h1 style="font-size:1.8rem;font-weight:800;line-height:1.1;margin-top:4px"><?=h($titles[$tab]??'Dashboard')?></h1></div><span class="amwho"><img src="<?=h($CFG['skin_api'])?>/avatar/<?=urlencode($user)?>/30" data-skin-user="<?=h($user)?>" data-skin-size="30" onerror="skinFallback(this)" alt=""><?=h($user)?> · <?= is_supervisor($user)?'Supervisor':role_label(user_role($user)) ?></span></div>
 
     <?php if($tab==='dash'){
       $stat=function($q,$d=0){ try{ return (int)db()->query($q)->fetchColumn(); }catch(Exception $e){ return $d; } };
-      $users=$stat("SELECT COUNT(*) FROM `$T`"); $posts=$stat("SELECT COUNT(*) FROM web_posts");
-      $pend=$stat("SELECT COUNT(*) FROM web_topups WHERE status='pending'"); $rev=$stat("SELECT COALESCE(SUM(amount),0) FROM web_topups WHERE status='success'");
-      $opent=$stat("SELECT COUNT(*) FROM web_tickets WHERE status<>'closed'"); $adm=$stat("SELECT COUNT(*) FROM web_admins")+1;
-      $banned=$stat("SELECT COUNT(*) FROM web_wallet WHERE banned=1");
-      $promo=dgl_promo(); $now0=ms();
-      $activeGifts=$stat("SELECT COUNT(*) FROM web_giftcodes WHERE active=1 AND used<max_uses AND (expires IS NULL OR expires>$now0)");
-      $promoCount=$activeGifts+($promo['active']?1:0);
+      $now0 = ms();
+      $day7 = $now0 - 7*86400000;
+      $day24 = $now0 - 86400000;
+      $day30 = $now0 - 30*86400000;
+      // Stats cơ bản
+      $users      = $stat("SELECT COUNT(*) FROM `$T`");
+      $usersNew7  = $stat("SELECT COUNT(*) FROM `$T` WHERE regdate>$day7");
+      $usersNew24 = $stat("SELECT COUNT(*) FROM `$T` WHERE regdate>$day24");
+      $rev7       = $stat("SELECT COALESCE(SUM(amount),0) FROM web_topups WHERE status='success' AND created>$day7");
+      $revTotal   = $stat("SELECT COALESCE(SUM(amount),0) FROM web_topups WHERE status='success'");
+      $pendT      = $stat("SELECT COUNT(*) FROM web_topups WHERE status='pending'");
+      $opent      = $stat("SELECT COUNT(*) FROM web_tickets WHERE status<>'closed'");
+      $banned     = $stat("SELECT COUNT(*) FROM web_wallet WHERE banned=1");
+      $promo      = dgl_promo();
+      $activeGifts= $stat("SELECT COUNT(*) FROM web_giftcodes WHERE active=1 AND used<max_uses AND (expires IS NULL OR expires>$now0)");
+      // Live online (qua heartbeat)
+      $totalOnline = function_exists('get_total_online') ? get_total_online() : 0;
+      $srvStatus = function_exists('get_servers_status') ? get_servers_status(false) : [];
+      // Top spender 30d
+      $topSpender = []; try{ $topSpender = db()->query("SELECT username, SUM(amount) AS total FROM web_topups WHERE status='success' AND created>$day30 GROUP BY username ORDER BY total DESC LIMIT 3")->fetchAll(); }catch(Exception $e){}
+      // Recent activity
       $recentT=[]; try{ $recentT=db()->query("SELECT * FROM web_tickets ORDER BY updated DESC LIMIT 5")->fetchAll(); }catch(Exception $e){}
       $recentL=[]; try{ $recentL=db()->query("SELECT * FROM web_admin_log ORDER BY id DESC LIMIT 6")->fetchAll(); }catch(Exception $e){}
-      $slt=['open'=>'Đang mở','in_progress'=>'Đang xử lý','closed'=>'Đã đóng']; ?>
-      <div class="amstats">
-        <div class="amstat"><div class="amsi" style="background:rgba(86,207,214,.15)">👥</div><div><div class="amsv"><?=number_format($users)?></div><div class="amsl">Người dùng</div></div></div>
-        <div class="amstat"><div class="amsi" style="background:rgba(242,182,49,.15)">💰</div><div><div class="amsv"><?=number_format($rev,0,',','.')?>đ</div><div class="amsl">Tổng nạp (đã duyệt)</div></div></div>
-        <div class="amstat"><a href="?p=admin&tab=topups" style="text-decoration:none;display:flex;gap:14px;align-items:center"><div class="amsi" style="background:rgba(224,88,74,.15)">⏳</div><div><div class="amsv"><?=$pend?></div><div class="amsl">Giao dịch chờ duyệt</div></div></a></div>
-        <div class="amstat"><a href="?p=admin&tab=tickets" style="text-decoration:none;display:flex;gap:14px;align-items:center"><div class="amsi" style="background:rgba(91,141,239,.15)">🎫</div><div><div class="amsv"><?=$opent?></div><div class="amsl">Ticket chưa đóng</div></div></a></div>
-        <div class="amstat"><div class="amsi" style="background:rgba(179,156,232,.15)">📰</div><div><div class="amsv"><?=number_format($posts)?></div><div class="amsl">Bài viết</div></div></div>
-        <div class="amstat"><div class="amsi" style="background:rgba(255,141,176,.15)">🔑</div><div><div class="amsv"><?=$adm?></div><div class="amsl">Quản trị viên</div></div></div>
-        <div class="amstat"><a href="?p=admin&tab=users" style="text-decoration:none;display:flex;gap:14px;align-items:center"><div class="amsi" style="background:rgba(224,88,74,.15)">🚫</div><div><div class="amsv"><?=number_format($banned)?></div><div class="amsl">Người dùng bị ban</div></div></a></div>
-        <div class="amstat"><a href="?p=admin&tab=gift" style="text-decoration:none;display:flex;gap:14px;align-items:center"><div class="amsi" style="background:rgba(242,182,49,.15)">🎁</div><div><div class="amsv"><?=number_format($promoCount)?></div><div class="amsl">Khuyến mãi đang chạy<?= $promo['active']?' (+'.$promo['percent'].'% nạp)':'' ?></div></div></a></div>
+      $recentTop=[]; try{ $recentTop=db()->query("SELECT * FROM web_topups WHERE status='pending' ORDER BY id DESC LIMIT 5")->fetchAll(); }catch(Exception $e){}
+      $slt=['open'=>'Đang mở','in_progress'=>'Đang xử lý','closed'=>'Đã đóng'];
+    ?>
+
+      <!-- TOP ROW: 4 KPI cards lớn -->
+      <div class="dash-kpi">
+        <div class="kpi-card kpi-online">
+          <div class="kpi-ico">⚡</div>
+          <div class="kpi-body">
+            <div class="kpi-val"><?=number_format($totalOnline)?></div>
+            <div class="kpi-lbl">Đang online</div>
+            <div class="kpi-sub"><?=count(array_filter($srvStatus, fn($s)=>$s['online']))?>/<?=count($srvStatus)?> server</div>
+          </div>
+        </div>
+        <div class="kpi-card kpi-users">
+          <div class="kpi-ico">👥</div>
+          <div class="kpi-body">
+            <div class="kpi-val"><?=number_format($users)?></div>
+            <div class="kpi-lbl">Tổng người dùng</div>
+            <div class="kpi-sub"><span style="color:#7dd47f">+<?=number_format($usersNew7)?></span> trong 7 ngày · <span style="color:#7dd47f">+<?=number_format($usersNew24)?></span> hôm nay</div>
+          </div>
+        </div>
+        <div class="kpi-card kpi-rev">
+          <div class="kpi-ico">💰</div>
+          <div class="kpi-body">
+            <div class="kpi-val"><?=number_format($rev7,0,',','.')?>đ</div>
+            <div class="kpi-lbl">Doanh thu 7 ngày</div>
+            <div class="kpi-sub">Tổng tích lũy: <?=number_format($revTotal,0,',','.')?>đ</div>
+          </div>
+        </div>
+        <a class="kpi-card kpi-alert" href="?p=admin&tab=topups">
+          <div class="kpi-ico"><?= $pendT>0?'🔴':'✅' ?></div>
+          <div class="kpi-body">
+            <div class="kpi-val"><?=$pendT?></div>
+            <div class="kpi-lbl">Giao dịch chờ duyệt</div>
+            <div class="kpi-sub"><?= $pendT>0?'Cần xử lý →':'Không có việc cần làm' ?></div>
+          </div>
+        </a>
       </div>
-      <div class="admin-grid" style="margin-top:8px">
+
+      <!-- SECOND ROW: server status (full width) -->
+      <div class="card dash-servers" style="margin-top:14px">
+        <div class="ahd" style="border:0;padding:14px 18px 8px;display:flex;align-items:center;gap:8px"><span>🖥</span><span>Trạng thái server</span></div>
+        <?php if(!$srvStatus){ echo '<div class="cmid" style="padding:14px">Plugin chưa hook hoặc chưa có server nào.</div>'; }
+        else { ?>
+        <div class="dash-srvlist">
+          <?php foreach($srvStatus as $s){
+            $dot = $s['online'] ? 'on' : 'off';
+            echo '<div class="dash-srvitem"><span class="srvdot '.$dot.'"></span>'
+                .'<div class="dash-srvname">'.h($s['name']).'</div>'
+                .'<div class="dash-srvcount">'.($s['online']?(int)$s['count'].' online':'<span class="sub2">Offline</span>').'</div>'
+                .'</div>';
+          } ?>
+        </div>
+        <?php } ?>
+      </div>
+
+      <!-- THIRD ROW: Top spender + Pending topups + Recent activity -->
+      <div class="dash-row3" style="margin-top:14px">
         <div class="card" style="padding:0;overflow:hidden">
-          <div class="ahd">Ticket gần đây</div>
+          <div class="ahd" style="display:flex;align-items:center;gap:8px"><span>🏆</span><span>Top nạp 30 ngày</span></div>
+          <?php if(!$topSpender) echo '<div class="cmid">Chưa có giao dịch.</div>';
+            else { $rk=0; foreach($topSpender as $sp){ $rk++;
+              echo '<a class="tk" href="?p=admin&tab=users&euser='.urlencode($sp['username']).'">'
+                  .'<span class="tno" style="color:'.($rk===1?'#f2b631':($rk===2?'#c0c4cd':'#cd7f32')).'">#'.$rk.'</span>'
+                  .'<div class="ti"><div class="ts">'.h($sp['username']).'</div><div class="tmeta">'.number_format($sp['total'],0,',','.').'đ</div></div>'
+                  .'<img src="'.h($CFG['skin_api']).'/avatar/'.urlencode($sp['username']).'/28" data-skin-user="'.h($sp['username']).'" data-skin-size="28" onerror="skinFallback(this)" style="width:28px;height:28px;border-radius:6px" alt="">'
+                  .'</a>';
+            }} ?>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="ahd" style="display:flex;align-items:center;gap:8px"><span>⏳</span><span>Chờ duyệt (<?=count($recentTop)?>)</span></div>
+          <?php if(!$recentTop) echo '<div class="cmid">Không có giao dịch chờ.</div>';
+            else foreach($recentTop as $tp){
+              echo '<a class="tk" href="?p=admin&tab=topups">'
+                  .'<span class="tno" style="color:var(--gold)">'.number_format((int)$tp['amount'],0,',','.').'đ</span>'
+                  .'<div class="ti"><div class="ts">'.h($tp['username']).'</div><div class="tmeta">'.h($tp['method']).' · '.date('d/m H:i',(int)($tp['created']/1000)).'</div></div>'
+                  .'<span class="tst in_progress">PENDING</span>'
+                  .'</a>';
+            } ?>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="ahd" style="display:flex;align-items:center;gap:8px"><span>🎫</span><span>Ticket gần đây</span></div>
           <?php if(!$recentT) echo '<div class="cmid">Chưa có ticket.</div>';
             else foreach($recentT as $t) echo '<a class="tk" href="?p=ticket&id='.(int)$t['id'].'"><span class="tno">'.h($t['code']?:ticket_code($t['id'])).'</span><div class="ti"><div class="ts">'.h($t['subject']).'</div><div class="tmeta">'.h($t['username']).' · '.date('d/m H:i',(int)($t['updated']/1000)).'</div></div><span class="tst '.h($t['status']).'">'.($slt[$t['status']]??$t['status']).'</span></a>'; ?>
         </div>
-        <div class="card" style="padding:0;overflow:hidden">
-          <div class="ahd">Hoạt động Admin gần đây</div>
-          <?php if(!$recentL) echo '<div class="cmid">Chưa có hoạt động.</div>';
-            else { echo '<div style="padding:6px 0">'; foreach($recentL as $lg) echo '<div class="logrow"><img src="'.h($CFG['skin_api']).'/avatar/'.urlencode($lg['admin']).'/28" data-skin-user="'.h($lg['admin']).'" data-skin-size="28" onerror="skinFallback(this)" alt=""><div class="lgb"><span class="lga">'.h($lg['admin']).'</span> <span class="lgac">'.h($lg['action']).'</span><div class="lgd">'.h($lg['detail']).'</div></div><span class="lgt">'.date('d/m H:i',(int)($lg['created']/1000)).'</span></div>'; echo '</div>'; } ?>
-        </div>
+      </div>
+
+      <!-- FOURTH ROW: Admin activity log (full width) -->
+      <div class="card" style="padding:0;overflow:hidden;margin-top:14px">
+        <div class="ahd" style="display:flex;align-items:center;gap:8px"><span>📜</span><span>Hoạt động Admin gần đây</span></div>
+        <?php if(!$recentL) echo '<div class="cmid">Chưa có hoạt động.</div>';
+          else { echo '<div style="padding:6px 0">'; foreach($recentL as $lg) echo '<div class="logrow"><img src="'.h($CFG['skin_api']).'/avatar/'.urlencode($lg['admin']).'/28" data-skin-user="'.h($lg['admin']).'" data-skin-size="28" onerror="skinFallback(this)" alt=""><div class="lgb"><span class="lga">'.h($lg['admin']).'</span> <span class="lgac">'.h($lg['action']).'</span><div class="lgd">'.h($lg['detail']).'</div></div><span class="lgt">'.date('d/m H:i',(int)($lg['created']/1000)).'</span></div>'; echo '</div>'; } ?>
       </div>
 
     <?php } elseif($tab==='posts'){
@@ -76,9 +165,12 @@
             <div class="field"><label>Ảnh bìa (URL)</label><input name="image" value="<?= $edit?h($edit['image']):'' ?>" placeholder="https://i.imgur.com/..."></div>
             <div class="g2">
               <div class="field"><label>Ngày diễn ra (Sự kiện)</label><input type="date" name="event_at" value="<?= ($edit&&$edit['event_at'])?date('Y-m-d',(int)($edit['event_at']/1000)):'' ?>"></div>
-              <div class="field"><label>Server (Cập nhật / Hướng dẫn)</label>
-                <input name="server" value="<?= $edit?h($edit['server']??''):'' ?>" placeholder="VD: Survival, SDO, Lobby — để trống nếu áp dụng toàn server" list="srv-suggest">
-                <datalist id="srv-suggest"><?php foreach(($CFG['ticket_servers']??[]) as $s) echo '<option value="'.h($s).'">'; ?></datalist>
+              <div class="field"><label>Server (gắn bài cho server riêng — hiện ở tab Tin tức của server đó)</label>
+                <input name="server" value="<?= $edit?h($edit['server']??''):'' ?>" placeholder="VD: RPG Towny Survival / Sword Dark Online / Skyblock — để trống nếu áp dụng toàn network" list="srv-suggest">
+                <datalist id="srv-suggest">
+                  <?php foreach(($CFG['modes']??[]) as $msid=>$mname){ echo '<option value="'.h($mname).'">'.h($msid).'</option>'; } ?>
+                </datalist>
+                <div class="sub2" style="margin-top:4px;font-size:.78rem">Gõ <b>tên đầy đủ</b> server (vd: "RPG Towny Survival") để bài hiện trong tab "Tin tức" của trang server.</div>
               </div>
             </div>
             <div class="field"><label>Nội dung</label><textarea name="content" required><?= $edit?h($edit['content']):'' ?></textarea></div>
@@ -100,82 +192,435 @@
 
     <?php } elseif($tab==='users'){
       $eu=$_GET['euser']??null; $eue=null; $euw=null;
-      if($eu){ try{ $st=db()->prepare("SELECT realname,email FROM `$T` WHERE LOWER(username)=?"); $st->execute([strtolower($eu)]); $eue=$st->fetch(); $euw=wallet($eu); }catch(Exception $e){} }
-      $users=[]; try{ $users=db()->query("SELECT a.realname uname, a.email, COALESCE(w.dogecoin,0) dogecoin, COALESCE(w.doge_spent,0) doge_spent, COALESCE(w.verified,0) verified, COALESCE(w.logins,0) logins, COALESCE(w.banned,0) banned, COALESCE(w.ban_reason,'') ban_reason FROM `$T` a LEFT JOIN web_wallet w ON w.username=a.realname ORDER BY a.id DESC LIMIT 300")->fetchAll(); }catch(Exception $e){} ?>
-      <?php if($eue){ $einv=[]; try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,id"); $is->execute([$eue['realname']]); foreach($is->fetchAll() as $row) $einv[$row['mode']][]=$row; }catch(Exception $e){} $modes=$CFG['modes']; ?>
+      if($eu){ try{ $st=db()->prepare("SELECT * FROM `$T` WHERE LOWER(username)=?"); $st->execute([strtolower($eu)]); $eue=$st->fetch(); $euw=wallet($eu); }catch(Exception $e){} }
+      // ===== Search + filter =====
+      $q       = trim($_GET['q'] ?? '');
+      $fStatus = trim($_GET['status'] ?? '');
+      $fSort   = trim($_GET['sort'] ?? 'newest');
+      $offset  = max(0, (int)($_GET['offset'] ?? 0));
+      $perPage = 50;
+      // Build WHERE + binds
+      $where = []; $binds = [];
+      if ($q !== '') {
+        $where[] = '(LOWER(a.username) LIKE ? OR LOWER(a.email) LIKE ? OR LOWER(a.realname) LIKE ?)';
+        $like = '%'.strtolower($q).'%'; $binds[] = $like; $binds[] = $like; $binds[] = $like;
+      }
+      if ($fStatus === 'banned')    $where[] = 'w.banned=1';
+      elseif ($fStatus === 'verified') $where[] = 'w.verified=1';
+      elseif ($fStatus === 'unverified') $where[] = '(w.verified=0 OR w.verified IS NULL)';
+      elseif ($fStatus === 'admin')   $where[] = 'EXISTS (SELECT 1 FROM web_admins ad WHERE LOWER(ad.username)=LOWER(a.realname))';
+      $whereSql = $where ? ' WHERE '.implode(' AND ',$where) : '';
+      $orderBy = ['newest'=>'a.id DESC','oldest'=>'a.id ASC','lastlogin'=>'COALESCE(a.lastlogin,0) DESC','az'=>'a.realname ASC'][$fSort] ?? 'a.id DESC';
+      // Count + paged query
+      $totalU = 0; $users = [];
+      try {
+        $cs = db()->prepare("SELECT COUNT(*) FROM `$T` a LEFT JOIN web_wallet w ON w.username=a.realname".$whereSql);
+        $cs->execute($binds); $totalU = (int)$cs->fetchColumn();
+        $sql = "SELECT a.realname uname, a.email, a.regdate, a.lastlogin AS authme_lastlogin, a.ip AS authme_ip,
+                  COALESCE(w.verified,0) verified, COALESCE(w.banned,0) banned, COALESCE(w.ban_reason,'') ban_reason,
+                  COALESCE((SELECT role FROM web_admins ad WHERE LOWER(ad.username)=LOWER(a.realname) LIMIT 1),'') AS adm_role,
+                  COALESCE((SELECT console FROM web_admins ad2 WHERE LOWER(ad2.username)=LOWER(a.realname) LIMIT 1),0) AS has_console
+                FROM `$T` a LEFT JOIN web_wallet w ON w.username=a.realname".$whereSql." ORDER BY $orderBy LIMIT $perPage OFFSET $offset";
+        $us = db()->prepare($sql); $us->execute($binds); $users = $us->fetchAll();
+      } catch(Exception $e){}
+      // Build URL with filters preserved
+      $qsBase = ['p'=>'admin','tab'=>'users'];
+      if($q!=='') $qsBase['q']=$q;
+      if($fStatus!=='') $qsBase['status']=$fStatus;
+      if($fSort!=='newest') $qsBase['sort']=$fSort;
+      $mkUrl = function($extra=[]) use($qsBase){ return '?'.http_build_query(array_merge($qsBase,$extra)); };
+    ?>
+      <?php if($eue){
+        $einv=[]; try{ $is=db()->prepare("SELECT * FROM web_inventory WHERE username=? ORDER BY mode,id"); $is->execute([$eue['realname']]); foreach($is->fetchAll() as $row) $einv[$row['mode']][]=$row; }catch(Exception $e){}
+        $modes=$CFG['modes'];
+        // AuthMe info
+        $authIp = $eue['ip'] ?? ''; $authRegIp = $eue['regip'] ?? '';
+        $authLastLogin = (int)($eue['lastlogin'] ?? 0);
+        $authRegDate = (int)($eue['regdate'] ?? 0);
+        $authWorld = $eue['world'] ?? '';
+        $authX = (float)($eue['x'] ?? 0); $authY = (float)($eue['y'] ?? 0); $authZ = (float)($eue['z'] ?? 0);
+        // Server stats per-server (web_player_stats)
+        $srvStats = []; try{ $ss=db()->prepare("SELECT * FROM web_player_stats WHERE username=? ORDER BY playtime_sec DESC"); $ss->execute([$eue['realname']]); $srvStats=$ss->fetchAll(); }catch(Exception $e){}
+        // Topup summary
+        $topupTotal = 0; $topupCount = 0; $recentTopups = [];
+        try {
+          $tt = db()->prepare("SELECT COALESCE(SUM(amount),0), COUNT(*) FROM web_topups WHERE username=? AND status='success'");
+          $tt->execute([$eue['realname']]); $row=$tt->fetch(PDO::FETCH_NUM); $topupTotal=(int)$row[0]; $topupCount=(int)$row[1];
+          $rt = db()->prepare("SELECT * FROM web_topups WHERE username=? ORDER BY id DESC LIMIT 5"); $rt->execute([$eue['realname']]); $recentTopups=$rt->fetchAll();
+        } catch(Exception $e){}
+        // Login history (web + game)
+        $loginHist = [];
+        try { $lh = db()->prepare("SELECT * FROM web_login_log WHERE LOWER(username)=? ORDER BY id DESC LIMIT 20");
+          $lh->execute([strtolower($eue['realname'])]); $loginHist = $lh->fetchAll(); }
+        catch(Exception $e){}
+        // Auto-unban nếu ban_until đã hết hạn
+        if(!empty($euw['banned']) && (int)($euw['ban_until']??0)>0 && (int)$euw['ban_until']<ms()){
+          try{ db()->prepare("UPDATE web_wallet SET banned=0, ban_reason='', banned_by='', banned_at=0, ban_until=0, ban_ip='' WHERE username=?")->execute([$eue['realname']]);
+            $euw['banned']=0; $euw['ban_until']=0; $euw['ban_ip']=''; $euw['ban_reason']=''; $euw['banned_by']=''; }catch(Exception $e){}
+        }
+        // Online detection: scan heartbeat players
+        $onlineOn = '';
+        if (function_exists('get_servers_status')) {
+          foreach(get_servers_status(false) as $sid=>$sv){
+            if (!empty($sv['online']) && !empty($sv['players']) && in_array($eue['realname'], $sv['players'], true)) { $onlineOn = $sv['name'] ?: $sid; break; }
+          }
+        }
+        // Permissions check
+        $userRole = user_role($eue['realname']);
+        $isUserAdmin = ($userRole !== '');
+        $isUserConsole = false;
+        try {
+          $ck = db()->prepare("SELECT console FROM web_admins WHERE LOWER(username)=? LIMIT 1");
+          $ck->execute([strtolower($eue['realname'])]);
+          if($r=$ck->fetch()) $isUserConsole=!empty($r['console']);
+        } catch(Exception $e){}
+        $isUserOwner = is_owner($eue['realname']);  // hardcoded supervisor từ config
+      ?>
+        <a class="btn btn-ghost btn-sm" href="?p=admin&tab=users" style="margin-bottom:14px">← Danh sách user</a>
+
+        <!-- USER HEADER with avatar + quick stats -->
+        <div class="card" style="padding:24px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+            <img src="<?=h($CFG['skin_api'])?>/avatar/<?=urlencode($eue['realname'])?>/80" data-skin-user="<?=h($eue['realname'])?>" data-skin-size="80" onerror="skinFallback(this)" style="width:80px;height:80px;border-radius:14px;background:#1a1d22" alt="">
+            <div style="flex:1;min-width:200px">
+              <h2 style="font-size:1.6rem;font-weight:800;margin:0;line-height:1.2"><?=h($eue['realname'])?>
+                <?php if($isUserOwner) echo '<span class="st" style="background:rgba(255,141,176,.18);color:#ff8db0;margin-left:6px">SUPERVISOR</span>';
+                  elseif($isUserAdmin) echo '<span class="st" style="background:rgba(91,141,239,.18);color:#8fb4ff;margin-left:6px">ADMIN</span>'; ?>
+              </h2>
+              <div class="sub2" style="margin-top:4px">
+                <code><?=h($eue['username'])?></code>
+                <?php if($eue['email']) echo ' · '.h($eue['email']); ?>
+                <?php if($authRegDate>0) echo ' · Đăng ký '.date('d/m/Y',(int)($authRegDate/1000)); ?>
+              </div>
+            </div>
+            <div style="display:flex;gap:18px;text-align:right">
+              <div><div style="font-size:1.4rem;font-weight:800;color:var(--gold)"><?=doge_balance($eue['realname'])?></div><div class="sub2">Dogecoin</div></div>
+              <div><div style="font-size:1.4rem;font-weight:800;color:#7dd47f"><?=number_format($topupTotal,0,',','.')?>đ</div><div class="sub2">Đã nạp (<?=$topupCount?> lần)</div></div>
+              <div><div style="font-size:1.4rem;font-weight:800;color:#9fd2ff"><?=(int)($euw['logins']??0)?></div><div class="sub2">Login web</div></div>
+            </div>
+          </div>
+        </div>
+
+        <?php
+          $isBanE = !empty($euw['banned']); $ownerE = is_owner($eue['realname']);
+          $banUntilE = (int)($euw['ban_until']??0);
+          $banIpE    = (string)($euw['ban_ip']??'');
+          $roleColors = ['supervisor'=>'#ff8db0','admin'=>'#7dd47f','support'=>'#8fb4ff'];
+          $curColor   = $roleColors[$userRole] ?? '#9aa0a6';
+        ?>
+
+        <!-- ROW 1: AuthMe + Trạng thái + Ban (left) | Server activity (right) -->
+        <div class="admin-grid" style="margin-bottom:16px">
+          <div class="card" style="padding:22px<?= $isBanE?';border-color:rgba(224,88,74,.4)':'' ?>">
+            <h3 class="ah" style="display:flex;align-items:center;gap:8px">🔐 Thông tin AuthMe & Trạng thái</h3>
+
+            <!-- Status badges row -->
+            <div class="ustatusrow">
+              <?php if($onlineOn): ?>
+                <span class="ustatus on"><span class="ustatus-dot"></span> Online · <?=h($onlineOn)?></span>
+              <?php else: ?>
+                <span class="ustatus off"><span class="ustatus-dot"></span> Offline<?= $authLastLogin>0?' · '.date('d/m H:i',(int)($authLastLogin/1000)):'' ?></span>
+              <?php endif; ?>
+              <?php if($isBanE){
+                if($banUntilE>0){
+                  $hours = max(0, ($banUntilE - ms())/3600000);
+                  $left = $hours>=24 ? round($hours/24).' ngày' : round($hours,1).' giờ';
+                  echo '<span class="ustatus banned">🚫 Ban '.$left.' nữa · '.date('d/m/Y H:i',(int)($banUntilE/1000)).'</span>';
+                } else echo '<span class="ustatus banned">🚫 Ban vĩnh viễn</span>';
+                if($banIpE!=='') echo '<span class="ustatus ipban">📡 IP banned · <code>'.h($banIpE).'</code></span>';
+              } else echo '<span class="ustatus ok">✓ Không bị ban</span>'; ?>
+            </div>
+            <?php if($isBanE && !empty($euw['ban_reason'])): ?>
+              <div class="banreason">Lý do: <b><?=h($euw['ban_reason'])?></b><?= !empty($euw['banned_by'])?' · bởi '.h($euw['banned_by']):'' ?><?= !empty($euw['banned_at'])?' · '.date('d/m/Y H:i',(int)($euw['banned_at']/1000)):'' ?></div>
+            <?php endif; ?>
+
+            <!-- AuthMe details -->
+            <div class="udlist">
+              <div><span class="udl-k">Last login game</span><span class="udl-v"><?= $authLastLogin>0?date('d/m/Y H:i:s',(int)($authLastLogin/1000)):'<span class="sub2">Chưa từng</span>' ?></span></div>
+              <div><span class="udl-k">Login IP</span><span class="udl-v"><code><?=h($authIp?:'—')?></code></span></div>
+              <div><span class="udl-k">Đăng ký lúc</span><span class="udl-v"><?= $authRegDate>0?date('d/m/Y H:i:s',(int)($authRegDate/1000)):'—' ?></span></div>
+              <div><span class="udl-k">Đăng ký IP</span><span class="udl-v"><code><?=h($authRegIp?:'—')?></code></span></div>
+              <div><span class="udl-k">Last location</span><span class="udl-v"><?= $authWorld?'<code>'.h($authWorld).'</code> '.round($authX).' / '.round($authY).' / '.round($authZ):'<span class="sub2">—</span>' ?></span></div>
+            </div>
+
+            <!-- Ban controls -->
+            <?php if(!$ownerE): ?>
+              <div class="bancontrols">
+                <?php if($isBanE): ?>
+                  <form method="post" action="?p=admin&tab=users" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="user_unban"><input type="hidden" name="username" value="<?=h($eue['realname'])?>"><input type="hidden" name="back_edit" value="1">
+                    <button class="btn btn-green btn-sm" type="submit">✓ Gỡ ban</button>
+                    <span class="sub2">Hệ thống sẽ gỡ AuthMe ban + IP ban trên mọi server.</span>
+                  </form>
+                <?php else: ?>
+                  <form method="post" action="?p=admin&tab=users" class="banform" onsubmit="return confirm('Ban tài khoản <?=h($eue['realname'])?>?')">
+                    <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="user_ban"><input type="hidden" name="username" value="<?=h($eue['realname'])?>"><input type="hidden" name="back_edit" value="1">
+                    <select name="days" class="banform-d">
+                      <option value="0">Vĩnh viễn</option>
+                      <option value="1">1 ngày</option>
+                      <option value="3">3 ngày</option>
+                      <option value="7">7 ngày</option>
+                      <option value="30" selected>30 ngày</option>
+                      <option value="90">90 ngày</option>
+                      <option value="365">1 năm</option>
+                    </select>
+                    <input name="reason" placeholder="Lý do (tuỳ chọn)" class="banform-r">
+                    <label class="banform-ip" title="Ban luôn IP cuối đăng nhập (chặn cả tài khoản phụ cùng IP)"><input type="checkbox" name="ban_ip" value="1"> Ban IP</label>
+                    <button class="btn bdel btn-sm" type="submit" style="background:var(--red);color:#fff">🚫 Ban</button>
+                  </form>
+                <?php endif; ?>
+              </div>
+            <?php endif; ?>
+          </div>
+
+          <div class="card" style="padding:22px">
+            <h3 class="ah" style="display:flex;align-items:center;gap:8px">🖥 Hoạt động trên server</h3>
+            <?php if(!$srvStats) echo '<p class="sub2" style="margin:0">Chưa có data stats. Plugin DogelandSync chưa sync cho user này.</p>';
+              else { echo '<div class="udlist">';
+                foreach($srvStats as $ss0){
+                  $srvName = $modes[$ss0['server_id']] ?? $ss0['server_id'];
+                  $playh = function_exists('fmt_playtime') ? fmt_playtime((int)$ss0['playtime_sec']) : ((int)$ss0['playtime_sec'].'s');
+                  $lastSeen = (int)$ss0['last_seen']>0 ? date('d/m H:i',(int)($ss0['last_seen']/1000)) : '—';
+                  echo '<div><span class="udl-k">'.h($srvName).'</span><span class="udl-v">'.h($playh).' chơi · Lv '.(int)$ss0['level'].' · Last seen '.$lastSeen.'</span></div>';
+                }
+              echo '</div>'; } ?>
+          </div>
+        </div>
+
+        <!-- ROW 2: Topup history (left) | Login history (right) -->
+        <div class="admin-grid" style="margin-bottom:16px">
+          <div class="card" style="padding:22px">
+            <h3 class="ah" style="display:flex;align-items:center;gap:8px">💳 Lịch sử nạp tiền</h3>
+            <?php if(!$recentTopups) echo '<p class="sub2" style="margin:0">Chưa có giao dịch nào.</p>';
+              else { echo '<div class="udlist">';
+                foreach($recentTopups as $tp){
+                  $stCls=['success'=>'success','rejected'=>'rejected','pending'=>'pending'][$tp['status']]??'pending';
+                  echo '<div><span class="udl-k">'.date('d/m/Y H:i',(int)($tp['created']/1000)).'</span><span class="udl-v">'.number_format((int)$tp['amount'],0,',','.').'đ · '.h($tp['method']).' · <span class="st '.$stCls.'">'.h($tp['status']).'</span></span></div>';
+                }
+              echo '</div>'; }
+              if($topupCount > 5) echo '<p class="sub2" style="margin-top:10px">... và '.($topupCount-5).' giao dịch khác. Tổng nạp đã duyệt: <b>'.number_format($topupTotal,0,',','.').'đ</b></p>';
+            ?>
+          </div>
+          <div class="card" style="padding:22px">
+            <h3 class="ah" style="display:flex;align-items:center;gap:8px">📜 Lịch sử đăng nhập <span class="sub2" style="font-weight:600;font-size:.78rem">(web · 20 mới nhất)</span></h3>
+            <?php if(!$loginHist) echo '<p class="sub2" style="margin:0">Chưa ghi nhận lần đăng nhập web nào.</p>';
+              else { echo '<div class="loginlog">';
+                foreach($loginHist as $lg){
+                  $ok = !empty($lg['success']);
+                  $tType = $lg['type']==='game' ? '🎮' : '🌐';
+                  $tIcon = $ok ? '<span class="lg-ok">●</span>' : '<span class="lg-fail">●</span>';
+                  echo '<div class="loginlog-r">'
+                    .'<span class="lg-time">'.date('d/m H:i:s',(int)($lg['created']/1000)).'</span>'
+                    .'<span class="lg-status">'.$tIcon.' '.$tType.'</span>'
+                    .'<span class="lg-ip"><code>'.h($lg['ip']?:'—').'</code></span>'
+                    .'</div>';
+                }
+              echo '</div>'; } ?>
+          </div>
+        </div>
+
+        <!-- COMPACT PERMISSIONS STRIP -->
+        <?php if(!$isUserOwner): ?>
+        <div class="permbar"<?= $isUserAdmin?' style="border-color:'.$curColor.'55"':'' ?>>
+          <div class="permbar-lbl"><span>Phân quyền:</span>
+            <?php
+              if($userRole) echo '<span class="st" style="background:'.$curColor.'22;color:'.$curColor.';font-weight:800">'.role_label($userRole).'</span>';
+              else echo '<span class="st" style="background:rgba(255,255,255,.05);color:var(--muted)">Player</span>';
+              if($isUserConsole) echo ' <span class="st" style="background:rgba(125,212,127,.18);color:#7dd47f">Console</span>';
+            ?>
+          </div>
+          <?php if(is_supervisor($user)){ ?>
+            <form method="post" action="?p=admin&tab=users&euser=<?=urlencode($eue['realname'])?>" class="permbar-f">
+              <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="role_set"><input type="hidden" name="username" value="<?=h($eue['realname'])?>">
+              <select name="role">
+                <option value=""<?=!$userRole?' selected':''?>>Player</option>
+                <option value="support"<?=$userRole==='support'?' selected':''?>>Support</option>
+                <option value="admin"<?=$userRole==='admin'?' selected':''?>>Admin</option>
+              </select>
+              <label><input type="checkbox" name="console" value="1"<?=$isUserConsole?' checked':''?>> Console</label>
+              <button class="btn btn-green btn-sm" type="submit">Lưu</button>
+            </form>
+          <?php } else echo '<span class="sub2" style="margin-left:auto">Chỉ Supervisor mới đổi được.</span>'; ?>
+        </div>
+        <?php endif; ?>
+
+        <!-- EDIT FORM (simplified — wallet + rank + verify) -->
         <div class="card" style="padding:24px;margin-bottom:20px">
-          <h3 class="ah">Sửa tài khoản: <?=h($eue['realname'])?></h3>
-          <form method="post" action="?p=admin&tab=users">
+          <h3 class="ah">✎ Sửa nhanh tài khoản</h3>
+          <form method="post" action="?p=admin&tab=users&euser=<?=urlencode($eue['realname'])?>">
             <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="user_save"><input type="hidden" name="username" value="<?=h($eue['realname'])?>">
             <div class="g2">
               <div class="field"><label>Email</label><input name="email" value="<?=h($eue['email'])?>"></div>
-              <div class="field"><label>Đặt lại mật khẩu (để trống nếu giữ nguyên)</label><input name="newpw" type="text" placeholder="Mật khẩu mới"></div>
+              <div class="field"><label>Reset password (để trống = giữ)</label><input name="newpw" type="text" placeholder="Mật khẩu mới"></div>
               <div class="field"><label><?=h($CFG['doge_label']??'Dogecoin')?> (số dư)</label><input name="dogecoin" type="number" value="<?=doge_balance($eue['realname'])?>"></div>
-              <div class="field"><label>Đã tiêu (chỉ xem)</label><input type="number" value="<?=(int)($euw['doge_spent']??0)?>" disabled></div>
-              <div class="field"><label>Rank in-game</label><input name="rank_name" value="<?=h($euw['rank_name']??'')?>" placeholder="VD: vip, mvp, default"></div>
-              <div class="field"><label>Suffix in-game</label><input name="suffix" value="<?=h($euw['suffix']??'')?>" placeholder="VD: &c[Huyền Thoại]"></div>
+              <div class="field"><label>Rank in-game</label><input name="rank_name" value="<?=h($euw['rank_name']??'')?>" placeholder="vip, mvp, default..."></div>
+              <div class="field"><label>Suffix in-game</label><input name="suffix" value="<?=h($euw['suffix']??'')?>" placeholder="&c[Huyền Thoại]"></div>
+              <div class="field"><label>&nbsp;</label><label class="chk" style="margin-top:6px"><input type="checkbox" name="verified" value="1"<?= $euw['verified']?' checked':'' ?>> Đã verify</label></div>
             </div>
-            <label class="chk"><input type="checkbox" name="verified" value="1"<?= $euw['verified']?' checked':'' ?>> Đã xác minh (verified)</label>
-            <p class="sub2" style="margin:-4px 0 14px">Thay đổi <b>Rank/Suffix</b> sẽ tạo lệnh LuckPerms đưa vào hàng đợi RCON áp dụng in-game.</p>
+            <p class="sub2" style="margin:-4px 0 14px">Đổi <b>Rank/Suffix</b> → tạo lệnh LuckPerms qua RCON queue.</p>
             <div style="display:flex;gap:10px"><button class="btn btn-green" type="submit">Lưu thay đổi</button><a class="btn btn-ghost" href="?p=admin&tab=users">Huỷ</a></div>
           </form>
         </div>
-        <?php $isBanE=!empty($euw['banned']); $ownerE=is_owner($eue['realname']); ?>
-        <div class="card" style="padding:24px;margin-bottom:20px;border-color:<?= $isBanE?'rgba(224,88,74,.4)':'var(--line)' ?>">
-          <h3 class="ah">Khoá tài khoản (Ban)</h3>
-          <?php if($ownerE){ echo '<p class="sub2">Không thể ban chủ sở hữu.</p>'; }
-            elseif($isBanE){ ?>
-            <div class="flash error" style="margin-bottom:14px">Đang bị ban<?= !empty($euw['ban_reason'])?' — Lý do: <b>'.h($euw['ban_reason']).'</b>':'' ?><?= !empty($euw['banned_by'])?' · bởi '.h($euw['banned_by']):'' ?></div>
-            <form method="post" action="?p=admin&tab=users">
-              <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="user_unban"><input type="hidden" name="username" value="<?=h($eue['realname'])?>"><input type="hidden" name="back_edit" value="1">
-              <button class="btn btn-green" type="submit">Gỡ ban</button>
-            </form>
-          <?php } else { ?>
-            <form method="post" action="?p=admin&tab=users" onsubmit="return confirm('Ban tài khoản <?=h($eue['realname'])?>?')">
-              <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="user_ban"><input type="hidden" name="username" value="<?=h($eue['realname'])?>"><input type="hidden" name="back_edit" value="1">
-              <div class="field"><label>Lý do (tuỳ chọn)</label><input name="reason" placeholder="VD: Gian lận / phá hoại server"></div>
-              <button class="btn bdel" type="submit" style="background:var(--red);color:#fff">Ban tài khoản</button>
-            </form>
-            <p class="sub2" style="margin-top:10px">Người bị ban không thể đăng nhập web và sẽ nhận lệnh <code>/ban</code> qua hàng đợi RCON.</p>
-          <?php } ?>
-        </div>
+        <?php
+          // ===== Inventory render từ DogelandSync (chỉ server có trong $CFG['modes']) =====
+          $invByServer = []; // [server_id => [section => [items]]]
+          $validModes = array_keys($modes);
+          if ($validModes) {
+            try{
+              $ph = implode(',', array_fill(0, count($validModes), '?'));
+              $iq=db()->prepare("SELECT * FROM web_inventory WHERE username=? AND mode IN ($ph) ORDER BY mode, section, slot, id");
+              $iq->execute(array_merge([$eue['realname']], $validModes));
+              foreach($iq->fetchAll() as $row){
+                $invByServer[$row['mode']??''][$row['section']??'main'][] = $row;
+              }
+            }catch(Exception $e){}
+          }
+          $sectionLabels = [
+            'main'    => ['Túi chính (36 ô)', '🎒'],
+            'armor'   => ['Giáp', '🛡️'],
+            'offhand' => ['Tay trái', '✋'],
+            'ender'   => ['Hòm Ender (27 ô)', '🟪'],
+          ];
+        ?>
         <div class="card" style="padding:24px;margin-bottom:20px">
-          <h3 class="ah">Kho đồ của <?=h($eue['realname'])?></h3>
-          <form method="post" action="?p=admin&tab=users" enctype="multipart/form-data" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px">
-            <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="inv_add"><input type="hidden" name="username" value="<?=h($eue['realname'])?>">
-            <div class="field" style="margin:0;flex:1;min-width:110px"><label>Chế độ</label><select name="mode"><?php foreach($modes as $mk=>$mn) echo '<option value="'.$mk.'">'.h($mn).'</option>'; ?></select></div>
-            <div class="field" style="margin:0;flex:2;min-width:130px"><label>Vật phẩm</label><input name="item" placeholder="VD: Kiếm Kim Cương" required></div>
-            <div class="field" style="margin:0;width:70px"><label>SL</label><input name="qty" type="number" value="1" min="1"></div>
-            <div class="field" style="margin:0;width:110px"><label>Mã icon</label><input name="item_key" list="itemkeys" placeholder="diamond_sword"></div>
-            <div class="field" style="margin:0;flex:1;min-width:150px"><label>Ảnh (URL)</label><input name="image" placeholder="https://… (tuỳ chọn)"></div>
-            <div class="field" style="margin:0;flex:1;min-width:150px"><label>hoặc tải ảnh lên</label><input name="image_file" type="file" accept="image/*"></div>
-            <div class="field" style="margin:0;width:80px"><label>Màu</label><input name="color" value="#56cfd6"></div>
-            <button class="btn btn-green" type="submit">Thêm</button>
-          </form>
-          <p class="sub2" style="margin:-10px 0 14px">💡 Gán <b>ảnh riêng</b> (URL hoặc tải lên) cho từng vật phẩm; nếu để trống sẽ tự lấy icon theo <b>mã icon</b> (vd <code>diamond_sword</code>). Đấu giá & chợ trời sẽ dùng ảnh này.</p>
-          <?php foreach($modes as $mk=>$mn){ $items=$einv[$mk]??[]; if(!$items) continue;
-            echo '<div style="font-weight:700;color:var(--gold);font-size:.82rem;margin:10px 0 8px;text-transform:uppercase;letter-spacing:.5px">'.h($mn).'</div><div class="invgrid">';
-            foreach($items as $it){ $img=item_img($it['image']??'',$it['item_key']??'');
-              echo '<div class="slot" title="'.h($it['item']).'"><img class="ico" src="'.h($img).'" onerror="this.onerror=null;this.src=\'?img=doge\'" alt=""><span class="qy">'.($it['qty']>1?(int)$it['qty']:'').'</span><span class="inm">'.h($it['item']).'</span><form method="post" action="?p=admin&tab=users" onsubmit="return confirm(\'Xoá?\')" style="position:absolute;top:3px;left:3px"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="inv_delete"><input type="hidden" name="id" value="'.(int)$it['id'].'"><input type="hidden" name="username" value="'.h($eue['realname']).'"><button type="submit" title="Xoá" style="background:var(--red);color:#fff;border:none;width:18px;height:18px;border-radius:5px;cursor:pointer;font-size:.7rem;line-height:1;padding:0">×</button></form></div>';
+          <h3 class="ah" style="display:flex;align-items:center;gap:8px">📦 Kho đồ thật (DogelandSync) — <?=h($eue['realname'])?></h3>
+          <p class="sub2" style="margin-bottom:18px">Inventory thật của player được sync từ plugin DogelandSync. Item <span style="color:#f2b631">khoá vàng 🔒</span> = đang rao bán/đấu giá. Item <span style="color:#9fd2ff">khoá xanh ⏳</span> = chờ giao cho player khi vào game.</p>
+
+          <?php if (!$invByServer) { ?>
+            <p class="sub2" style="margin:0">Kho đồ trống hoặc plugin chưa sync. Plugin sẽ tự snapshot khi player join/quit/đóng inventory.</p>
+          <?php } else {
+            foreach ($invByServer as $modeId => $sections) {
+              $modeName = $modes[$modeId] ?? ($modeId ?: 'Unknown');
+              echo '<div class="invsrv"><div class="invsrv-hd">🖥 '.h($modeName).' <code>'.h($modeId).'</code></div>';
+              foreach (['main','armor','offhand','ender'] as $secKey) {
+                $items = $sections[$secKey] ?? [];
+                if (!$items) continue;
+                $secLbl = $sectionLabels[$secKey] ?? [ucfirst($secKey),''];
+                echo '<div class="invsec"><div class="invsec-hd">'.$secLbl[1].' '.h($secLbl[0]).' <span class="sub2">('.count($items).' item)</span></div>';
+                echo '<div class="invgrid2">';
+                foreach ($items as $it) {
+                  $img = item_img($it['image']??'', $it['item_key']??$it['material']??'');
+                  $qty = (int)($it['qty']??1);
+                  $locked = (int)($it['locked']??0);
+                  $displayName = $it['display_name'] ?? $it['item'] ?? '';
+                  $material = $it['material'] ?? '';
+                  $enchants = $it['enchants'] ?? '';
+                  $damage = (int)($it['damage']??0); $maxDamage = (int)($it['max_damage']??0);
+                  $durPct = ($maxDamage > 0) ? max(0, min(100, round((1 - $damage/$maxDamage)*100))) : null;
+                  $tooltip = ($displayName?:$material).($material?' ('.$material.')':'').($qty>1?" ×$qty":'');
+                  $classExtras = ($locked===1?' inv-locked':'').($locked===2?' inv-pending':'').($enchants?' inv-ench':'');
+                  echo '<div class="inv2'.$classExtras.'" title="'.h($tooltip).'">';
+                  echo '<img class="ico" src="'.h($img).'" onerror="this.onerror=null;this.src=\'?img=doge\'" alt="">';
+                  if ($qty > 1) echo '<span class="qy">'.$qty.'</span>';
+                  if ($locked === 1) echo '<span class="lock-badge" title="Đang rao bán/đấu giá">🔒</span>';
+                  if ($locked === 2) echo '<span class="lock-badge2" title="Chờ giao khi vào game">⏳</span>';
+                  if ($durPct !== null && $durPct < 100) {
+                    $durColor = $durPct > 50 ? '#7dd47f' : ($durPct > 20 ? '#f2b631' : '#e0584a');
+                    echo '<div class="dur"><div class="dur-bar" style="width:'.$durPct.'%;background:'.$durColor.'"></div></div>';
+                  }
+                  if ($displayName && $displayName !== $material) {
+                    echo '<span class="inm">'.h(preg_replace('/§[0-9a-frlokmn]/i','',$displayName)).'</span>';
+                  } else if ($material) {
+                    $shortMat = preg_replace('/_/',' ',strtolower($material));
+                    echo '<span class="inm">'.h($shortMat).'</span>';
+                  }
+                  echo '<form method="post" action="?p=admin&tab=users&euser='.urlencode($eue['realname']).'" onsubmit="return confirm(\'Xoá item này khỏi kho?\')" class="inv-del"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="inv_delete"><input type="hidden" name="id" value="'.(int)$it['id'].'"><input type="hidden" name="username" value="'.h($eue['realname']).'"><button type="submit" title="Xoá">×</button></form>';
+                  echo '</div>';
+                }
+                echo '</div></div>';
+              }
+              echo '</div>';
             }
+          } ?>
+
+          <p class="sub2" style="margin-top:14px;font-size:.78rem">💡 Cần cấp item cho player? Dùng <a href="?p=admin&tab=console" style="color:var(--green);font-weight:700">Server Console</a> với lệnh <code>give &lt;player&gt; minecraft:diamond 64</code> — an toàn hơn và item có NBT chính xác.</p>
+        </div>
+      <?php } else { ?>
+      <!-- ===== Search + filter bar (chỉ hiện khi KHÔNG xem user detail) ===== -->
+      <form method="get" action="?p=admin" class="userfilter">
+        <input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="users">
+        <input type="search" name="q" value="<?=h($q)?>" placeholder="🔍 Tìm theo tên, email, IGN..." autocomplete="off" autofocus>
+        <select name="status" onchange="this.form.submit()">
+          <option value="">— Tất cả trạng thái —</option>
+          <option value="verified"<?=$fStatus==='verified'?' selected':''?>>✓ Đã verify</option>
+          <option value="unverified"<?=$fStatus==='unverified'?' selected':''?>>○ Chưa verify</option>
+          <option value="banned"<?=$fStatus==='banned'?' selected':''?>>🚫 Bị ban</option>
+          <option value="admin"<?=$fStatus==='admin'?' selected':''?>>🔑 Admin</option>
+        </select>
+        <select name="sort" onchange="this.form.submit()">
+          <option value="newest"<?=$fSort==='newest'?' selected':''?>>Đăng ký mới nhất</option>
+          <option value="oldest"<?=$fSort==='oldest'?' selected':''?>>Đăng ký cũ nhất</option>
+          <option value="lastlogin"<?=$fSort==='lastlogin'?' selected':''?>>Login game gần nhất</option>
+          <option value="az"<?=$fSort==='az'?' selected':''?>>Tên A → Z</option>
+        </select>
+        <button class="btn btn-green" type="submit">Lọc</button>
+        <?php if($q!==''||$fStatus!==''||$fSort!=='newest') echo '<a class="btn btn-ghost" href="?p=admin&tab=users">Reset</a>'; ?>
+      </form>
+
+      <div class="card" style="padding:0;overflow:hidden;margin-top:14px">
+        <div class="ahd" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>Tài khoản người chơi</span>
+          <span class="st in_progress" style="margin:0"><?=number_format($totalU)?> match<?= $totalU!==count($users)?' · hiển thị '.($offset+1).'-'.($offset+count($users)):'' ?></span>
+          <?php if($q!=='') echo '<span class="sub2">tìm: "<b>'.h($q).'</b>"</span>'; ?>
+        </div>
+        <div style="overflow-x:auto"><table class="tbl tbl-user">
+          <thead><tr>
+            <th style="width:48px"></th>
+            <th>Tài khoản</th>
+            <th style="width:130px">Role</th>
+            <th style="width:130px">Trạng thái</th>
+            <th style="width:150px">Last login game</th>
+            <th class="tr" style="width:180px">Hành động</th>
+          </tr></thead>
+          <tbody>
+          <?php if(!$users) echo '<tr><td colspan="6" class="cmid">'.($q!==''||$fStatus!==''?'Không tìm thấy user nào khớp với bộ lọc.':'Chưa có tài khoản.').'</td></tr>';
+            else foreach($users as $u2){
+              $isBan=!empty($u2['banned']); $owner=is_owner($u2['uname']);
+              $admRole = $u2['adm_role'] ?? ''; $hasConsoleU = !empty($u2['has_console']);
+              $effRole = $owner ? 'supervisor' : $admRole;
+              // Role badge
+              $rb = ['supervisor'=>['SUPERVISOR','#ff8db0'],'admin'=>['ADMIN','#7dd47f'],'support'=>['SUPPORT','#8fb4ff']];
+              if (isset($rb[$effRole])) {
+                $role = '<span class="st" style="background:'.$rb[$effRole][1].'22;color:'.$rb[$effRole][1].';font-weight:800">'.$rb[$effRole][0].'</span>';
+                if ($hasConsoleU && $effRole !== 'supervisor') $role .= ' <span class="st" style="background:rgba(125,212,127,.18);color:#7dd47f;font-size:.65rem;margin-left:2px">Console</span>';
+              } else $role = '<span class="st" style="background:rgba(255,255,255,.05);color:var(--muted)">Player</span>';
+              // Status badge
+              $stt = $isBan ? '<span class="st rejected">🚫 Bị ban</span>' : ($u2['verified']?'<span class="st success">✓ Verified</span>':'<span class="st pending">○ Chưa</span>');
+              $banForm = $owner ? '<span class="sub2">—</span>' : ($isBan
+                  ? '<form method="post" action="?p=admin&tab=users" style="display:inline"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_unban"><input type="hidden" name="username" value="'.h($u2['uname']).'"><button class="btn btn-green btn-sm" type="submit">Gỡ ban</button></form>'
+                  : '<form method="post" action="?p=admin&tab=users" style="display:inline" onsubmit="this.querySelector(\'[name=reason]\').value=prompt(\'Lý do ban '.h($u2['uname']).' (tuỳ chọn):\',\'\')||\'\';return confirm(\'Ban '.h($u2['uname']).'?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_ban"><input type="hidden" name="username" value="'.h($u2['uname']).'"><input type="hidden" name="reason" value=""><button class="btn btn-sm bdel" type="submit">Ban</button></form>');
+              $avatar = h($CFG['skin_api']).'/avatar/'.urlencode($u2['uname']).'/36';
+              $regd = $u2['regdate'] > 0 ? date('d/m/Y',(int)($u2['regdate']/1000)) : '—';
+              $lastLogin = (int)($u2['authme_lastlogin'] ?? 0);
+              $lastTxt = $lastLogin > 0 ? date('d/m H:i',(int)($lastLogin/1000)) : '<span class="sub2">Chưa từng</span>';
+              $lastIp = $u2['authme_ip'] ?? '';
+              echo '<tr>'
+                .'<td><img src="'.$avatar.'" data-skin-user="'.h($u2['uname']).'" data-skin-size="36" onerror="skinFallback(this)" style="width:36px;height:36px;border-radius:7px;background:#1a1d22" alt=""></td>'
+                .'<td><b>'.h($u2['uname']).'</b><div class="sub2">Đăng ký: '.$regd.'</div></td>'
+                .'<td>'.$role.'</td>'
+                .'<td>'.$stt.($isBan && $u2['ban_reason']?'<div class="sub2" style="max-width:180px">'.h($u2['ban_reason']).'</div>':'').'</td>'
+                .'<td class="sub2">'.$lastTxt.($lastIp?'<div class="sub2" style="font-size:.7rem"><code>'.h($lastIp).'</code></div>':'').'</td>'
+                .'<td class="tr" style="white-space:nowrap">'
+                  .'<a class="btn btn-ghost btn-sm" href="?p=admin&tab=users&euser='.urlencode($u2['uname']).'">Xem</a> '
+                  .$banForm
+                  .' <form method="post" action="?p=admin&tab=users" style="display:inline" onsubmit="return confirm(\'Xoá tài khoản '.h($u2['uname']).'?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_delete"><input type="hidden" name="username" value="'.h($u2['uname']).'"><button class="btn btn-sm bdel">Xoá</button></form>'
+                .'</td></tr>';
+            } ?>
+          </tbody></table></div>
+        <?php
+          // Pagination
+          if ($totalU > $perPage) {
+            $totalPages = (int)ceil($totalU / $perPage);
+            $curPage    = (int)floor($offset / $perPage) + 1;
+            echo '<div class="userpager">';
+            if ($curPage > 1) echo '<a class="btn btn-ghost btn-sm" href="'.h($mkUrl(['offset'=>($curPage-2)*$perPage])).'">← Trước</a>';
+            echo '<span class="sub2" style="padding:0 12px">Trang '.$curPage.' / '.$totalPages.'</span>';
+            if ($curPage < $totalPages) echo '<a class="btn btn-ghost btn-sm" href="'.h($mkUrl(['offset'=>$curPage*$perPage])).'">Sau →</a>';
             echo '</div>';
           }
-          if(!$einv) echo '<p class="sub2">Kho đồ trống.</p>'; ?>
-        </div>
-      <?php } ?>
-      <div class="card" style="padding:0;overflow:hidden">
-        <div class="ahd">Tài khoản người chơi (<?=count($users)?>)</div>
-        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Tài khoản</th><th>Email</th><th><?=h($CFG['doge_label']??'Dogecoin')?></th><th>Đã tiêu</th><th>Trạng thái</th><th>Login</th><th></th></tr></thead><tbody>
-        <?php if(!$users) echo '<tr><td colspan="7" class="cmid">Chưa có tài khoản.</td></tr>';
-          else foreach($users as $u2){ $isBan=!empty($u2['banned']); $owner=is_owner($u2['uname']);
-            $stt = $isBan ? '<span class="st rejected">Bị ban</span>' : ($u2['verified']?'<span class="st success">Verified</span>':'<span class="st pending">Chưa</span>');
-            $banForm = $owner ? '<span class="sub2">—</span>' : ($isBan
-                ? '<form method="post" action="?p=admin&tab=users" style="display:inline"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_unban"><input type="hidden" name="username" value="'.h($u2['uname']).'"><button class="btn btn-green btn-sm" type="submit">Gỡ ban</button></form>'
-                : '<form method="post" action="?p=admin&tab=users" style="display:inline" onsubmit="this.querySelector(\'[name=reason]\').value=prompt(\'Lý do ban '.h($u2['uname']).' (tuỳ chọn):\',\'\')||\'\';return confirm(\'Ban '.h($u2['uname']).'?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_ban"><input type="hidden" name="username" value="'.h($u2['uname']).'"><input type="hidden" name="reason" value=""><button class="btn btn-sm bdel" type="submit">Ban</button></form>');
-            echo '<tr><td style="font-weight:700">'.h($u2['uname']).($owner?' <span class="st" style="background:rgba(255,141,176,.18);color:#ff8db0">OWNER</span>':'').'</td><td class="sub2">'.h($u2['email']).'</td><td style="color:#f7c948;font-weight:700">Ð'.number_format($u2['dogecoin'],0,',','.').'</td><td class="sub2">'.number_format($u2['doge_spent'],0,',','.').'</td><td>'.$stt.'</td><td class="sub2">'.(int)$u2['logins'].'</td><td class="tr" style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="?p=admin&tab=users&euser='.urlencode($u2['uname']).'">Sửa</a> '.$banForm.' <form method="post" action="?p=admin&tab=users" style="display:inline" onsubmit="return confirm(\'Xoá tài khoản '.h($u2['uname']).'?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="user_delete"><input type="hidden" name="username" value="'.h($u2['uname']).'"><button class="btn btn-sm bdel">Xoá</button></form></td></tr>';
-          } ?>
-        </tbody></table></div>
+        ?>
       </div>
+      <?php } /* end else (not viewing user detail) */ ?>
 
     <?php } elseif($tab==='topups'){
       $txs=[]; try{ $txs=db()->query("SELECT * FROM web_topups ORDER BY id DESC LIMIT 100")->fetchAll(); }catch(Exception $e){} ?>
@@ -324,34 +769,21 @@
           } ?>
       </div>
 
-    <?php } elseif($tab==='staff'){
-      $admins=[]; try{ $admins=db()->query("SELECT * FROM web_admins ORDER BY created DESC")->fetchAll(); }catch(Exception $e){} ?>
-      <div class="admin-grid">
-        <div class="card" style="padding:26px">
-          <h3 class="ah">Cấp quyền Admin</h3>
-          <form method="post" action="?p=admin&tab=staff">
-            <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="admin_grant">
-            <div class="field"><label>Tên tài khoản (IGN)</label><input name="username" placeholder="Nhập IGN cần cấp quyền" required></div>
-            <button class="btn btn-green btn-block" type="submit">Cấp quyền admin</button>
-          </form>
-          <p class="sub2" style="margin-top:14px">Mọi admin đều có thể cấp quyền cho người khác. Chỉ <b style="color:#ff8db0"><?=h($CFG['owner'])?></b> (chủ sở hữu) là không thể bị thu quyền.</p>
-        </div>
-        <div class="card" style="padding:0;overflow:hidden">
-          <div class="ahd">Quản trị viên (<?=count($admins)+1?>)</div>
-          <div style="overflow-x:auto"><table class="tbl"><tbody>
-          <tr><td><b style="color:#ff8db0"><?=h($CFG['owner'])?></b> <span class="vbadge ok" style="margin-left:4px">OWNER</span><div class="sub2">Chủ sở hữu · toàn quyền</div></td><td class="tr"><span class="sub2">Không thể thu</span></td></tr>
-          <?php foreach($admins as $ad) echo '<tr><td><b>'.h($ad['username']).'</b><div class="sub2">Cấp bởi '.h($ad['granted_by']).' · '.date('d/m/Y',(int)($ad['created']/1000)).'</div></td><td class="tr"><form method="post" action="?p=admin&tab=staff" onsubmit="return confirm(\'Thu quyền của '.h($ad['username']).'?\')"><input type="hidden" name="csrf" value="'.$CSRF.'"><input type="hidden" name="act" value="admin_revoke"><input type="hidden" name="username" value="'.h($ad['username']).'"><button class="btn btn-sm bdel">Thu quyền</button></form></td></tr>'; ?>
-          </tbody></table></div>
-        </div>
-      </div>
-
     <?php } elseif($tab==='announce'){
       $hist=[]; try{ $hist=db()->query("SELECT * FROM web_announce ORDER BY id DESC LIMIT 30")->fetchAll(); }catch(Exception $e){}
       $cur=active_announce(); $lvls=['info'=>'Thông tin (xanh)','warn'=>'Cảnh báo (vàng)','danger'=>'Khẩn cấp (đỏ)']; ?>
       <div class="admin-grid">
         <div class="card" style="padding:26px">
           <h3 class="ah">Đăng thông báo khẩn</h3>
-          <?php if($cur) echo '<div class="flash ok" style="margin-bottom:14px">Đang hiển thị: "'.h($cur['message']).'"</div>'; ?>
+          <?php if($cur) { ?>
+            <div class="flash ok" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between">
+              <span><b>Đang hiển thị:</b> "<?=h($cur['message'])?>"</span>
+              <form method="post" action="?p=admin&tab=announce" style="display:inline" onsubmit="return confirm('Tắt thông báo đang hiện trên web?')">
+                <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="announce_off"><input type="hidden" name="id" value="<?=(int)$cur['id']?>">
+                <button class="btn btn-sm bdel" type="submit" style="background:var(--red);color:#fff;font-weight:700">✕ Tắt ngay</button>
+              </form>
+            </div>
+          <?php } ?>
           <form method="post" action="?p=admin&tab=announce">
             <input type="hidden" name="csrf" value="<?=$CSRF?>"><input type="hidden" name="act" value="announce_save">
             <div class="field"><label>Mức độ</label><select name="level"><?php foreach($lvls as $k=>$v) echo '<option value="'.$k.'">'.$v.'</option>'; ?></select></div>
@@ -371,6 +803,149 @@
           </tbody></table></div>
         </div>
       </div>
+
+    <?php } elseif($tab==='console'){
+      if(!can_console($user)){ echo '<div class="empty">Bạn không có quyền vào Console.</div>'; }
+      else {
+        $srvStatus = function_exists('get_servers_status') ? get_servers_status(false) : [];
+        $recent = []; try{ $recent = db()->query("SELECT * FROM web_rcon_queue ORDER BY id DESC LIMIT 50")->fetchAll(); }catch(Exception $e){}
+    ?>
+      <?php
+        // Build server list: merge config modes (named) + heartbeat-only servers (mới, chỉ ID)
+        $consoleServers = []; // id => display label
+        foreach ($srvStatus as $s) {
+          if (!empty($s['home_show'])) {
+            $consoleServers[$s['id']] = [
+              'label' => $s['name'] . ($s['online'] ? '' : ' (offline)'),
+              'online' => !empty($s['online']),
+            ];
+          }
+        }
+        // Thêm server từ heartbeat KHÔNG có trong config — chỉ hiện ID, đang online
+        try {
+          $hb = db()->query("SELECT server_id, last_beat FROM web_sync_heartbeat WHERE last_beat > " . (ms() - 30000))->fetchAll();
+          foreach ($hb as $r) {
+            $hbId = $r['server_id'];
+            if (!isset($consoleServers[$hbId])) {
+              $consoleServers[$hbId] = ['label' => $hbId . ' (chưa có trong config)', 'online' => true];
+            }
+          }
+        } catch(Exception $e){}
+      ?>
+      <div class="ahd-row" style="margin-bottom:14px"><p style="color:var(--muted);margin:0">Live console + gõ lệnh trực tiếp xuống server. Lệnh chạy ngay, output stream live phía trên. ↑/↓ duyệt history.</p></div>
+
+      <!-- LIVE CONSOLE + COMMAND INPUT INTEGRATED -->
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+        <div class="ahd console-hd">
+          <span>Live Console</span>
+          <select id="csrvFilter" style="margin-left:12px;font-size:.85rem">
+            <?php foreach($consoleServers as $sid => $info) echo '<option value="'.h($sid).'"'.(!$info['online']?' disabled':'').'>'.h($info['label']).'</option>'; ?>
+          </select>
+          <span id="cstatus" class="cstatus off" style="margin-left:auto">⬤ Đang kết nối...</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="consoleClear()" style="margin-left:8px">Clear</button>
+          <label class="cscroll"><input type="checkbox" id="cautoscroll" checked> Auto-scroll</label>
+        </div>
+        <div class="console-term" id="cterm"><div class="cline cinfo">Đang kết nối SSE...</div></div>
+        <div class="console-input">
+          <span class="ci-prompt">$</span>
+          <input id="cinput" type="text" maxlength="240" placeholder="gõ lệnh: say Hello · gamemode creative TheMouseRanger · give Player diamond 64 ..." autocomplete="off" spellcheck="false">
+          <button type="button" id="csend" onclick="sendCmd()">▶ Send</button>
+        </div>
+      </div>
+
+      <!-- Log lệnh gần đây (50) — có output -->
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+        <div class="ahd">Lệnh gần đây (<?=count($recent)?>)</div>
+        <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table class="tbl">
+          <thead><tr><th style="width:140px">Khi</th><th style="width:110px">Server</th><th>Lệnh</th><th>Bởi</th><th style="width:100px">Trạng thái</th><th>Kết quả</th></tr></thead>
+          <tbody>
+          <?php if(!$recent) echo '<tr><td colspan="6" class="cmid">Chưa có lệnh nào.</td></tr>';
+            else foreach($recent as $rq){
+              $stCls = ['done'=>'success','failed'=>'pending','pending'=>'pending','processing'=>'pending'][$rq['status']] ?? 'pending';
+              echo '<tr>'
+                .'<td class="sub2">'.date('d/m H:i:s',(int)($rq['created']/1000)).'</td>'
+                .'<td><code>'.h($rq['server_id']?:'—').'</code></td>'
+                .'<td style="font-family:monospace;font-size:.86rem">'.h($rq['command']).'</td>'
+                .'<td>'.h($rq['requested_by']).'</td>'
+                .'<td><span class="st '.$stCls.'">'.h($rq['status']).'</span></td>'
+                .'<td class="sub2" style="font-family:monospace;font-size:.82rem;max-width:300px;word-break:break-word">'.h($rq['output']?:'—').'</td>'
+                .'</tr>';
+            } ?>
+          </tbody></table></div>
+      </div>
+
+      <script>
+      (function(){
+        const term   = document.getElementById('cterm');
+        const status = document.getElementById('cstatus');
+        const srvSel = document.getElementById('csrvFilter');
+        const auto   = document.getElementById('cautoscroll');
+        const cinput = document.getElementById('cinput');
+        const csend  = document.getElementById('csend');
+        const CSRF   = <?=json_encode($CSRF)?>;
+        let es = null, sinceId = 0;
+        const MAX_LINES = 500;
+        const history = []; let histIdx = -1;
+        function pad(n){return String(n).padStart(2,'0')}
+        function fmtTime(ts){const d=new Date(+ts); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())}
+        function levelClass(lv){lv=(lv||'').toUpperCase(); if(lv==='SEVERE'||lv==='ERROR'||lv==='FATAL') return 'cerr'; if(lv==='WARN'||lv==='WARNING') return 'cwarn'; if(lv==='CHAT') return 'cchat'; if(lv==='COMMAND') return 'ccmd'; return 'cinfo';}
+        function esc(s){const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML;}
+        function appendLine(o){
+          const cls = levelClass(o.lv);
+          const srv = o.srv?'<span class="csrv">['+esc(o.srv)+']</span>':'';
+          const src = o.src?' <span class="csrc">'+esc(o.src)+'</span>':'';
+          const div = document.createElement('div');
+          div.className = 'cline ' + cls;
+          div.innerHTML = '<span class="ctime">['+fmtTime(o.ts)+']</span> <span class="clv">'+esc(o.lv)+'</span> '+srv+src+' '+esc(o.msg);
+          term.appendChild(div);
+          while (term.children.length > MAX_LINES) term.removeChild(term.firstChild);
+          if (auto.checked) term.scrollTop = term.scrollHeight;
+        }
+        function localLine(msg, cls){
+          const div = document.createElement('div'); div.className='cline '+(cls||'cinfo');
+          div.innerHTML='<span class="ctime">['+fmtTime(Date.now())+']</span> <span class="clv">WEB</span> '+esc(msg);
+          term.appendChild(div); if(auto.checked) term.scrollTop=term.scrollHeight;
+        }
+        window.consoleClear = function(){ term.innerHTML=''; };
+        function connect(){
+          if(es){try{es.close()}catch(e){} es=null;}
+          const srv = srvSel.value;
+          if(!srv){ localLine('Không có server online.','cwarn'); return; }
+          status.className='cstatus connecting'; status.textContent='⬤ Đang kết nối...';
+          es = new EventSource('?p=sse_console&srv='+encodeURIComponent(srv)+'&since='+sinceId);
+          es.addEventListener('open',()=>{status.className='cstatus on';status.textContent='⬤ '+srv;});
+          es.addEventListener('log',ev=>{try{const o=JSON.parse(ev.data); sinceId=Math.max(sinceId,o.id); appendLine(o);}catch(e){}});
+          es.addEventListener('cursor',ev=>{try{const o=JSON.parse(ev.data); if(o.since) sinceId=Math.max(sinceId,o.since);}catch(e){}});
+          es.addEventListener('bye',()=>{setTimeout(connect,300);});
+          es.onerror=()=>{status.className='cstatus off';status.textContent='⬤ Mất kết nối';if(es){try{es.close()}catch(e){}} es=null;setTimeout(connect,2000);};
+        }
+        srvSel.addEventListener('change',()=>{sinceId=0;term.innerHTML='';connect();});
+        window.sendCmd = function(){
+          const cmd = cinput.value.trim(); if(!cmd) return;
+          const srv = srvSel.value;
+          if(!srv){ localLine('Chọn server trước.','cerr'); return; }
+          localLine('$ ['+srv+'] '+cmd, 'ccmd');
+          history.unshift(cmd); if(history.length>50) history.pop(); histIdx=-1;
+          cinput.value=''; csend.disabled=true;
+          const fd = new FormData();
+          fd.append('csrf',CSRF); fd.append('act','rcon_exec');
+          fd.append('server_id',srv); fd.append('command',cmd); fd.append('ajax','1');
+          fetch('?p=admin&tab=console',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
+            .then(r=>r.json()).then(j=>{
+              if(j && j.ok) localLine('✓ '+(j.msg||'Đã gửi'),'cinfo');
+              else localLine('✗ '+(j&&j.msg?j.msg:'Lỗi'),'cerr');
+            }).catch(e=>localLine('✗ Network error: '+e.message,'cerr'))
+            .finally(()=>{csend.disabled=false;cinput.focus();});
+        };
+        cinput.addEventListener('keydown',ev=>{
+          if(ev.key==='Enter'){ ev.preventDefault(); sendCmd(); }
+          else if(ev.key==='ArrowUp'){ if(histIdx<history.length-1){histIdx++;cinput.value=history[histIdx];setTimeout(()=>cinput.selectionStart=cinput.value.length,0);} ev.preventDefault(); }
+          else if(ev.key==='ArrowDown'){ if(histIdx>0){histIdx--;cinput.value=history[histIdx];} else {histIdx=-1;cinput.value='';} ev.preventDefault(); }
+        });
+        connect();
+      })();
+      </script>
+    <?php } ?>
 
     <?php } elseif($tab==='logs'){
       $who=$_GET['admin']??''; $logs=[];

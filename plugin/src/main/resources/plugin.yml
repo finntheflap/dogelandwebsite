@@ -1,0 +1,27 @@
+name: DogelandSync
+version: ${project.version}
+main: vn.dogeland.sync.DogelandSync
+api-version: '1.20'
+author: Dogeland Network
+website: https://dogeland.vn
+description: Bridge Minecraft inventory to dogeland.vn web
+
+# Paper auto-downloads từ Maven Central lúc startup → không cần shade vào jar.
+libraries:
+  - com.zaxxer:HikariCP:5.1.0
+  - com.mysql:mysql-connector-j:8.4.0
+
+commands:
+  dgsync:
+    description: Force sync inventory của 1 player lên web
+    usage: /dgsync [player]
+    permission: dogelandsync.admin
+  dgsyncreload:
+    description: Reload config.yml
+    usage: /dgsyncreload
+    permission: dogelandsync.admin
+
+permissions:
+  dogelandsync.admin:
+    description: Quyền chạy lệnh admin của plugin
+    default: op

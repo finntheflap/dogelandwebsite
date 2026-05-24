@@ -25,15 +25,27 @@ require __DIR__ . '/settings.php';
 require __DIR__ . '/chat.php';
 require __DIR__ . '/api_utils.php';
 require __DIR__ . '/icons.php';
+require __DIR__ . '/inv_actions.php';
+require __DIR__ . '/servers.php';
+require __DIR__ . '/inv_safety.php';
 
 // Khởi tạo state user + IS_ADMIN
 $user = $_SESSION['user'] ?? null;
+// Nếu chưa có session nhưng có remember-me cookie → auto-restore
+if (!$user) {
+  $remembered = remember_check();
+  if ($remembered !== '') {
+    $_SESSION['user'] = $remembered;
+    $user = $remembered;
+  }
+}
 $p    = $_GET['p'] ?? 'home';
 $IS_ADMIN = is_admin($user);
 dgl_apply_pricing();
 if ($user) {
   $myw = wallet($user);
   if (!empty($myw['banned']) && !is_owner($user)) {
+    remember_revoke(); // ban → revoke luôn token, lần sau không auto-login
     $_SESSION['user'] = null; unset($_SESSION['user']);
     $user = null; $IS_ADMIN = false;
     flash(['error', 'Tài khoản của bạn đã bị khoá (ban).']);

@@ -15,7 +15,17 @@ require __DIR__ . '/includes/bootstrap.php';
 
 // 3) POST handlers (act=...)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  if (!csrf_ok()) { flash(['error', 'Phiên làm việc hết hạn, vui lòng thử lại.']); redirect($p); }
+  if (!csrf_ok()) {
+    // AJAX: trả JSON error thay vì redirect (tránh JS parse HTML lỗi)
+    $isAjax = !empty($_POST['ajax']) || (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'fetch');
+    if ($isAjax) {
+      header('Content-Type: application/json; charset=utf-8');
+      http_response_code(403);
+      echo json_encode(['ok'=>false, 'msg'=>'CSRF token hết hạn — refresh trang rồi thử lại.']);
+      exit;
+    }
+    flash(['error', 'Phiên làm việc hết hạn, vui lòng thử lại.']); redirect($p);
+  }
   $act = $_POST['act'] ?? '';
   require __DIR__ . '/actions/handle_post.php';
 }
@@ -23,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 4) API endpoints (sớm — return JSON / SSE rồi exit)
 if ($p === 'api')         { require __DIR__ . '/api/api.php'; }
 if ($p === 'sse')         { require __DIR__ . '/api/sse.php'; }
+if ($p === 'sse_console') { require __DIR__ . '/api/sse_console.php'; }
 require __DIR__ . '/api/auth_callbacks.php'; // verify / logout / discord_cb / updates
 
 // 5) Yêu cầu đăng nhập với một số trang
@@ -38,7 +49,7 @@ require __DIR__ . '/views/header.php';
 $PAGES = [
   'home', 'events', 'guide', 'rules', 'info', 'post', 'admin', 'top',
   'profile', 'tickets', 'ticket', 'topup', 'shop', 'auction', 'ranks',
-  'market', 'login', 'register', 'verify',
+  'market', 'login', 'register', 'verify', 'forgot', 'reset', 'server',
 ];
 
 echo '<main>';

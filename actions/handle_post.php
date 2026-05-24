@@ -47,6 +47,7 @@
 
   if($act==='login'){
     $u=trim($_POST['username']??''); $pw=$_POST['password']??'';
+    $ip=$_SERVER['REMOTE_ADDR']??''; $ua=mb_substr_safe($_SERVER['HTTP_USER_AGENT']??'',0,255);
     try{
       $pdo=db(); $t=$CFG['authme_table'];
       $st=$pdo->prepare("SELECT realname,password FROM `$t` WHERE LOWER(username)=? LIMIT 1");
@@ -54,14 +55,152 @@
       if($row && authme_verify($pw,$row['password'])){
         $name=$row['realname']?:$u;
         $bw=wallet($name);
-        if(!empty($bw['banned'])){ flash(['error','Tài khoản đã bị khoá (ban).'.(!empty($bw['ban_reason'])?' Lý do: '.$bw['ban_reason']:'').' Liên hệ admin để được hỗ trợ.']); redirect('login'); }
+        // Auto-unban nếu ban_until đã hết hạn
+        if(!empty($bw['banned']) && (int)($bw['ban_until']??0)>0 && (int)$bw['ban_until']<ms()){
+          try{ db()->prepare("UPDATE web_wallet SET banned=0, ban_reason='', banned_by='', banned_at=0, ban_until=0, ban_ip='' WHERE username=?")->execute([$name]); }catch(Exception $e){}
+          $bw['banned']=0;
+        }
+        if(!empty($bw['banned'])){
+          try{ db()->prepare("INSERT INTO web_login_log(username,type,ip,ua,success,created) VALUES(?,?,?,?,0,?)")->execute([$name,'web',$ip,$ua,ms()]); }catch(Exception $e){}
+          $bUntil = (int)($bw['ban_until']??0);
+          $untilTxt = $bUntil>0 ? ' (đến '.date('d/m/Y H:i',(int)($bUntil/1000)).')' : ' (vĩnh viễn)';
+          flash(['error','Tài khoản đã bị khoá (ban)'.$untilTxt.'.'.(!empty($bw['ban_reason'])?' Lý do: '.$bw['ban_reason']:'').' Liên hệ admin để được hỗ trợ.']);
+          redirect('login');
+        }
         $_SESSION['user']=$name;
         try{ db()->prepare("INSERT INTO web_wallet(username,logins,last_login,created) VALUES(?,1,?,?) ON DUPLICATE KEY UPDATE logins=logins+1,last_login=VALUES(last_login)")->execute([$name,ms(),ms()]); }catch(Exception $e){}
+        try{ db()->prepare("INSERT INTO web_login_log(username,type,ip,ua,success,created) VALUES(?,?,?,?,1,?)")->execute([$name,'web',$ip,$ua,ms()]); }catch(Exception $e){}
+        if(!empty($_POST['remember'])) remember_issue($name);
         flash(['ok','Đăng nhập thành công. Chào '.$name.'!']);
         redirect('home');
-      } else flash(['error','Sai tên đăng nhập hoặc mật khẩu.']);
+      } else {
+        try{ if($u!=='') db()->prepare("INSERT INTO web_login_log(username,type,ip,ua,success,created) VALUES(?,?,?,?,0,?)")->execute([$u,'web',$ip,$ua,ms()]); }catch(Exception $e){}
+        flash(['error','Sai tên đăng nhập hoặc mật khẩu.']);
+      }
     }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('login');
+  }
+
+  /* --- FORGOT PASSWORD: gửi mail reset link --- */
+  if($act==='forgot_password'){
+    $input = trim($_POST['identifier'] ?? '');
+    if($input === ''){ flash(['error','Nhập email hoặc tên tài khoản.']); redirect('forgot'); }
+    try{
+      $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+      $rl = db()->prepare("SELECT COUNT(*) FROM web_password_reset WHERE request_ip=? AND created>?");
+      $rl->execute([$ip, ms() - 3600000]);
+      if((int)$rl->fetchColumn() >= 3){ flash(['error','Bạn đã yêu cầu reset quá nhiều lần. Thử lại sau 1 giờ.']); redirect('forgot'); }
+    }catch(Exception $e){}
+    $row = null;
+    try{
+      $t = $CFG['authme_table'];
+      $st = db()->prepare("SELECT realname, username, email FROM `$t` WHERE LOWER(username)=? OR LOWER(email)=? LIMIT 1");
+      $st->execute([strtolower($input), strtolower($input)]);
+      $row = $st->fetch();
+    }catch(Exception $e){}
+    if($row && !empty($row['email']) && filter_var($row['email'], FILTER_VALIDATE_EMAIL)){
+      try{
+        $token = bin2hex(random_bytes(32));
+        $now = ms();
+        db()->prepare("UPDATE web_password_reset SET used=1 WHERE username=? AND used=0")->execute([$row['username']]);
+        db()->prepare("INSERT INTO web_password_reset(username,email,token,expires,used,request_ip,created) VALUES(?,?,?,?,0,?,?)")
+            ->execute([$row['username'], $row['email'], $token, $now + 3600000, $_SERVER['REMOTE_ADDR'] ?? '', $now]);
+        $resetLink = $CFG['site_url'].'/?p=reset&token='.$token;
+        $name = $row['realname'] ?: $row['username'];
+        $body = "Chào ".h($name).",<br><br>"
+              ."Bạn (hoặc ai đó) đã yêu cầu reset mật khẩu cho tài khoản Dogeland Network.<br><br>"
+              ."Mở link sau để đặt mật khẩu mới:<br>"
+              ."<a href=\"".h($resetLink)."\">".h($resetLink)."</a><br><br>"
+              ."Link hết hạn sau 1 giờ và chỉ dùng được 1 lần.<br><br>"
+              ."Nếu bạn KHÔNG yêu cầu reset, bỏ qua mail này — mật khẩu của bạn vẫn an toàn.<br><br>"
+              ."— Dogeland Network";
+        send_mail($row['email'], 'Reset mật khẩu Dogeland Network', $body);
+      }catch(Exception $e){}
+    }
+    flash(['ok','Nếu email/username tồn tại, mail reset đã được gửi. Vui lòng kiểm tra hộp thư (cả Spam) trong 1-2 phút.']);
+    redirect('login');
+  }
+
+  /* --- RESET PASSWORD: nhập password mới sau khi click link mail --- */
+  if($act==='reset_password'){
+    $token = preg_replace('/[^a-f0-9]/', '', $_POST['token'] ?? '');
+    $pw  = $_POST['password']  ?? '';
+    $pw2 = $_POST['password2'] ?? '';
+    if($token === '' || strlen($token) !== 64){ flash(['error','Link reset không hợp lệ.']); redirect('login'); }
+    if(strlen($pw) < 6){ flash(['error','Mật khẩu tối thiểu 6 ký tự.']); redirect('reset&token='.$token); }
+    if($pw !== $pw2){ flash(['error','Mật khẩu nhập lại không khớp.']); redirect('reset&token='.$token); }
+    try{
+      $st = db()->prepare("SELECT * FROM web_password_reset WHERE token=? LIMIT 1");
+      $st->execute([$token]); $row = $st->fetch();
+      if(!$row){ flash(['error','Link không hợp lệ hoặc đã dùng.']); redirect('login'); }
+      if($row['used']){ flash(['error','Link reset đã được dùng rồi.']); redirect('forgot'); }
+      if($row['expires'] < ms()){ flash(['error','Link reset đã hết hạn.']); redirect('forgot'); }
+      $t = $CFG['authme_table'];
+      db()->prepare("UPDATE `$t` SET password=? WHERE LOWER(username)=?")->execute([authme_make_hash($pw), strtolower($row['username'])]);
+      db()->prepare("UPDATE web_password_reset SET used=1 WHERE id=?")->execute([$row['id']]);
+      flash(['ok','Đổi mật khẩu thành công! Đăng nhập với mật khẩu mới.']);
+    }catch(Exception $e){ flash(['error','Lỗi xử lý reset.']); }
+    redirect('login');
+  }
+
+  /* --- SERVER CONSOLE: gõ lệnh RCON lên server Minecraft qua queue --- */
+  if($act==='rcon_exec'){
+    $isAjax = !empty($_POST['ajax']) || (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'fetch');
+    $reply = function($ok, $msg) use ($isAjax) {
+      if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>$ok,'msg'=>$msg],JSON_UNESCAPED_UNICODE); exit; }
+      flash([$ok?'ok':'error', $msg]); redirect('admin&tab=console');
+    };
+    if(!can_console($user)) $reply(false, 'Bạn không có quyền console.');
+    $sid = trim($_POST['server_id'] ?? '');
+    $cmd = trim($_POST['command'] ?? '');
+    $modes = $CFG['modes'] ?? [];
+    // Accept server-id nếu có trong config HOẶC đang online (heartbeat < 30s)
+    $validSid = isset($modes[$sid]);
+    if (!$validSid && $sid !== '') {
+      try {
+        $st = db()->prepare("SELECT 1 FROM web_sync_heartbeat WHERE server_id=? AND last_beat > ? LIMIT 1");
+        $st->execute([$sid, ms() - 30000]);
+        $validSid = (bool)$st->fetchColumn();
+      } catch(Exception $e){}
+    }
+    if(!$validSid) $reply(false, 'Server không hợp lệ hoặc offline.');
+    if($cmd === '') $reply(false, 'Nhập lệnh cần gõ.');
+    $cmd = preg_replace('/[\r\n\x00]+/',' ',$cmd);
+    $cmd = mb_substr_safe(trim($cmd),0,240);
+    if($cmd === '') $reply(false, 'Lệnh rỗng sau khi sanitize.');
+    try{
+      db()->prepare("INSERT INTO web_rcon_queue(command, server_id, requested_by, status, created) VALUES(?,?,?, 'pending', ?)")
+          ->execute([$cmd, $sid, $user, ms()]);
+      admin_log($user,'rcon_exec','['.$sid.'] '.mb_substr_safe($cmd,0,200));
+      $reply(true, 'Đã gửi tới '.$modes[$sid].' — kết quả hiện sau ~1-2s.');
+    }catch(Exception $e){ $reply(false, 'Lỗi gửi lệnh: '.$e->getMessage()); }
+  }
+
+  /* --- SERVER CONSOLE: cấp/thu quyền console — Supervisor only --- */
+  if($act==='console_grant'){
+    if(!is_supervisor($user)){ flash(['error','Chỉ Supervisor cấp được quyền console.']); redirect('home'); }
+    $uname = trim($_POST['username'] ?? '');
+    if($uname === ''){ flash(['error','Nhập username.']); redirect('admin&tab=console'); }
+    try{
+      $chk = db()->prepare("SELECT 1 FROM web_admins WHERE LOWER(username)=? LIMIT 1");
+      $chk->execute([strtolower($uname)]);
+      if(!$chk->fetch()){ flash(['error',$uname.' chưa phải admin. Cấp Admin trước rồi mới cấp Console.']); redirect('admin&tab=console'); }
+      db()->prepare("UPDATE web_admins SET console=1 WHERE LOWER(username)=?")->execute([strtolower($uname)]);
+      admin_log($user,'console_grant',$uname);
+      flash(['ok','Đã cấp quyền console cho '.$uname.'.']);
+    }catch(Exception $e){ flash(['error',$e->getMessage()]); }
+    redirect('admin&tab=console');
+  }
+  if($act==='console_revoke'){
+    if(!is_supervisor($user)){ flash(['error','Chỉ Supervisor thu được quyền console.']); redirect('home'); }
+    $uname = trim($_POST['username'] ?? '');
+    if($uname === '' || is_owner($uname)){ redirect('admin&tab=console'); }
+    try{
+      db()->prepare("UPDATE web_admins SET console=0 WHERE LOWER(username)=?")->execute([strtolower($uname)]);
+      admin_log($user,'console_revoke',$uname);
+      flash(['ok','Đã thu quyền console của '.$uname.'.']);
+    }catch(Exception $e){ flash(['error',$e->getMessage()]); }
+    redirect('admin&tab=console');
   }
 
   if($act==='topup'){
@@ -149,17 +288,37 @@
   if($act==='user_ban'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
     $uname=trim($_POST['username']??''); $reason=mb_substr_safe(trim($_POST['reason']??''),0,190);
+    $days=(int)($_POST['days']??0); if($days<0) $days=0; if($days>3650) $days=3650; // 10 năm max
+    $alsoIp = !empty($_POST['ban_ip']);
     if($uname===''){ redirect('admin&tab=users'); }
-    if(is_owner($uname)){ flash(['error','Không thể ban chủ sở hữu.']); redirect('admin&tab=users'); }
+    if(is_owner($uname)){ flash(['error','Không thể ban Supervisor.']); redirect('admin&tab=users'); }
     if(strtolower($uname)===strtolower((string)$user)){ flash(['error','Không thể tự ban chính mình.']); redirect('admin&tab=users'); }
     try{
       wallet($uname);
-      db()->prepare("UPDATE web_wallet SET banned=1, ban_reason=?, banned_by=?, banned_at=? WHERE username=?")->execute([$reason,$user,ms(),$uname]);
+      $banUntil = $days>0 ? (ms() + $days*86400000) : 0;
+      // Lấy IP cuối cùng từ AuthMe để banip luôn
+      $playerIp=''; try{
+        $t=$CFG['authme_table'];
+        $st=db()->prepare("SELECT ip FROM `$t` WHERE LOWER(username)=? LIMIT 1");
+        $st->execute([strtolower($uname)]); $playerIp = (string)$st->fetchColumn();
+      }catch(Exception $e){}
+      $storeIp = ($alsoIp && $playerIp!=='' && filter_var($playerIp, FILTER_VALIDATE_IP)) ? $playerIp : '';
+      db()->prepare("UPDATE web_wallet SET banned=1, ban_reason=?, banned_by=?, banned_at=?, ban_until=?, ban_ip=? WHERE username=?")
+          ->execute([$reason,$user,ms(),$banUntil,$storeIp,$uname]);
       $rcUname=rcon_arg($uname,32); $rcReason=rcon_text($reason!==''?$reason:'Vi phạm nội quy',120);
-      if($rcUname!=='') rcon_queue('ban '.$rcUname.' '.$rcReason, $user);
-      notify($uname,'info','Tài khoản bị khoá (ban)',$reason!==''?('Lý do: '.$reason):'Liên hệ admin để biết thêm.','','SYSTEM');
-      admin_log($user,'user_ban',$uname.($reason!==''?' — '.$reason:''));
-      flash(['ok','Đã ban '.$uname.'.']);
+      $nServers=0; $bannedIp=false;
+      if($rcUname!==''){
+        // AuthMe ban (username) — queue cho tất cả server
+        $nServers = rcon_queue_all('authme ban '.$rcUname.' '.$rcReason, $user);
+        if($storeIp!==''){
+          rcon_queue_all('authme banip '.$storeIp.' '.$rcReason, $user);
+          $bannedIp=true;
+        }
+      }
+      $durTxt = $days>0 ? ' '.$days.' ngày' : ' vĩnh viễn';
+      notify($uname,'info','Tài khoản bị khoá (ban)'.$durTxt,$reason!==''?('Lý do: '.$reason):'Liên hệ admin để biết thêm.','','SYSTEM');
+      admin_log($user,'user_ban',$uname.$durTxt.($bannedIp?' [+banip '.$storeIp.']':'').($reason!==''?' — '.$reason:''));
+      flash(['ok','Đã ban '.$uname.$durTxt.' qua AuthMe trên '.$nServers.' server'.($bannedIp?' + banip '.$storeIp:'').'.']);
     }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('admin&tab=users'.($_POST['back_edit']??false?'&euser='.urlencode($uname):''));
   }
@@ -167,11 +326,32 @@
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
     $uname=trim($_POST['username']??''); if($uname===''){ redirect('admin&tab=users'); }
     try{
-      db()->prepare("UPDATE web_wallet SET banned=0, ban_reason='', banned_by='', banned_at=0 WHERE username=?")->execute([$uname]);
-      $rcUname=rcon_arg($uname,32); if($rcUname!=='') rcon_queue('pardon '.$rcUname, $user);
+      // Lấy IP đã ban (nếu có) từ wallet — ưu tiên hơn là lấy IP hiện tại
+      $storedIp=''; try{
+        $w=db()->prepare("SELECT ban_ip FROM web_wallet WHERE username=? LIMIT 1");
+        $w->execute([$uname]); $storedIp = (string)$w->fetchColumn();
+      }catch(Exception $e){}
+      db()->prepare("UPDATE web_wallet SET banned=0, ban_reason='', banned_by='', banned_at=0, ban_until=0, ban_ip='' WHERE username=?")->execute([$uname]);
+      // Fallback: nếu không có IP stored, lấy từ authme
+      $playerIp = $storedIp;
+      if($playerIp===''){
+        try{
+          $t=$CFG['authme_table'];
+          $st=db()->prepare("SELECT ip FROM `$t` WHERE LOWER(username)=? LIMIT 1");
+          $st->execute([strtolower($uname)]); $playerIp = (string)$st->fetchColumn();
+        }catch(Exception $e){}
+      }
+      $rcUname=rcon_arg($uname,32); $nServers=0; $unbannedIp=false;
+      if($rcUname!==''){
+        $nServers = rcon_queue_all('authme unban '.$rcUname, $user);
+        if($playerIp!=='' && filter_var($playerIp, FILTER_VALIDATE_IP)){
+          rcon_queue_all('authme unbanip '.$playerIp, $user);
+          $unbannedIp=true;
+        }
+      }
       notify($uname,'info','Tài khoản đã được mở khoá','Bạn có thể đăng nhập lại bình thường.','?p=login','SYSTEM');
-      admin_log($user,'user_unban',$uname);
-      flash(['ok','Đã gỡ ban '.$uname.'.']);
+      admin_log($user,'user_unban',$uname.($unbannedIp?' [+unbanip '.$playerIp.']':''));
+      flash(['ok','Đã gỡ ban '.$uname.' trên '.$nServers.' server'.($unbannedIp?' + IP '.$playerIp:'').'.']);
     }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('admin&tab=users'.($_POST['back_edit']??false?'&euser='.urlencode($uname):''));
   }
@@ -595,12 +775,38 @@
     redirect('profile');
   }
 
-  /* --- OWNER: cấp / thu quyền admin --- */
+  /* --- SUPERVISOR: set role (support/admin/supervisor) + console flag cho 1 user --- */
+  if($act==='role_set'){
+    if(!is_supervisor($user)){ flash(['error','Chỉ Supervisor mới đổi được role.']); redirect('admin&tab=users'); }
+    $uname=trim($_POST['username']??'');
+    $role=trim($_POST['role']??'');
+    $console=!empty($_POST['console'])?1:0;
+    $allowedRoles=['','support','admin','supervisor'];
+    if(!in_array($role,$allowedRoles,true)){ flash(['error','Role không hợp lệ.']); redirect('admin&tab=users&euser='.urlencode($uname)); }
+    if(is_owner($uname)){ flash(['error','Không thể đổi role của Supervisor gốc (config).']); redirect('admin&tab=users&euser='.urlencode($uname)); }
+    if($uname==='') redirect('admin&tab=users');
+    try{
+      if($role===''){
+        db()->prepare("DELETE FROM web_admins WHERE LOWER(username)=?")->execute([strtolower($uname)]);
+        admin_log($user,'role_revoke','Thu role của '.$uname);
+        flash(['ok','Đã gỡ quyền admin của '.$uname.'.']);
+      } else {
+        db()->prepare("INSERT INTO web_admins(username,role,console,granted_by,created) VALUES(?,?,?,?,?)
+                       ON DUPLICATE KEY UPDATE role=VALUES(role), console=VALUES(console)")
+            ->execute([$uname,$role,$console,$user,ms()]);
+        admin_log($user,'role_set',$uname.' → '.$role.($console?' + console':''));
+        flash(['ok','Đã đặt '.$uname.' = '.role_label($role).($console?' + Console':'').'.']);
+      }
+    }catch(Exception $e){ flash(['error',$e->getMessage()]); }
+    redirect('admin&tab=users&euser='.urlencode($uname));
+  }
+
+  /* --- LEGACY: cấp / thu quyền admin (giữ tương thích) --- */
   if($act==='admin_grant'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
     $uname=trim($_POST['username']??'');
     if($uname!==''){
-      if(is_owner($uname)){ flash(['error','Không thể thay đổi quyền của chủ sở hữu.']); redirect('admin&tab=staff'); }
+      if(is_owner($uname)){ flash(['error','Không thể thay đổi quyền của Supervisor.']); redirect('admin&tab=staff'); }
       try{ db()->prepare("INSERT INTO web_admins(username,granted_by,created) VALUES(?,?,?) ON DUPLICATE KEY UPDATE granted_by=VALUES(granted_by)")->execute([$uname,$user,ms()]); admin_log($user,'grant_admin','Cấp quyền cho '.$uname); flash(['ok','Đã cấp quyền admin cho '.$uname.'.']); }catch(Exception $e){ flash(['error',db_err($e)]); }
     }
     redirect('admin&tab=staff');
@@ -608,7 +814,7 @@
   if($act==='admin_revoke'){
     if(!$IS_ADMIN){ flash(['error','Bạn không có quyền.']); redirect('home'); }
     $uname=strtolower(trim($_POST['username']??''));
-    if(is_owner($uname)){ flash(['error','Không thể thu quyền của chủ sở hữu.']); redirect('admin&tab=staff'); }
+    if(is_owner($uname)){ flash(['error','Không thể thu quyền của Supervisor.']); redirect('admin&tab=staff'); }
     if($uname===strtolower((string)$user) && !is_owner($user)){ flash(['error','Không thể tự thu quyền của chính mình.']); redirect('admin&tab=staff'); }
     try{ db()->prepare("DELETE FROM web_admins WHERE LOWER(username)=?")->execute([$uname]); admin_log($user,'revoke_admin','Thu quyền của '.$uname); flash(['ok','Đã thu quyền admin.']); }catch(Exception $e){}
     redirect('admin&tab=staff');
@@ -627,7 +833,21 @@
       admin_log($user,'announce','['.$lvl.'] '.$m);
       $emoji=['info'=>'ℹ️','warn'=>'⚠️','danger'=>'🔴'][$lvl];
       discord_notify($emoji.' **THÔNG BÁO** từ '.$user.":\n> ".$m.($exp?"\n_(hết hạn sau ".$hours."h)_":''));
-      flash(['ok','Đã đăng thông báo khẩn'.($CFG['discord_webhook']?' + gửi Discord':'').'.']);
+      // Auto /bc to ALL MC servers — chỉ nội dung, bold (&l), màu theo level
+      $mcColor = ['info'=>'&b','warn'=>'&e','danger'=>'&c'][$lvl] ?? '&e';
+      $bcCmd = 'bc '.$mcColor.'&l'.$m;
+      // Sanitize: remove newlines, limit length
+      $bcCmd = preg_replace('/[\r\n\x00]+/',' ',$bcCmd);
+      $bcCmd = mb_substr_safe(trim($bcCmd),0,240);
+      $bcServers = 0;
+      foreach (($CFG['modes'] ?? []) as $sid => $sname) {
+        try {
+          db()->prepare("INSERT INTO web_rcon_queue(command, server_id, requested_by, status, created) VALUES(?,?,?, 'pending', ?)")
+              ->execute([$bcCmd, $sid, $user, ms()]);
+          $bcServers++;
+        } catch (Exception $e) {}
+      }
+      flash(['ok','Đã đăng thông báo khẩn'.($CFG['discord_webhook']?' + gửi Discord':'').' + broadcast tới '.$bcServers.' server MC qua /bc.']);
     }catch(Exception $e){ flash(['error',db_err($e)]); }
     redirect('admin&tab=announce');
   }

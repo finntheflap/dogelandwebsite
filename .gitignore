@@ -9,3 +9,16 @@ uploads/
 Thumbs.db
 .idea/
 .vscode/
+
+# Claude Code cache/session data
+.claude/
+
+# Java/Maven build outputs (source tracked, target/ derived)
+**/target/
+*.class
+
+# Pre-packaged plugin archives
+plugin-src-*.zip
+
+# Built JARs served via /downloads (regenerate via mvn package)
+downloads/*.jar

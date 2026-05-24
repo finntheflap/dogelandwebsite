@@ -23,7 +23,7 @@ if($p==='verify'){
   }catch(Exception $e){ $verify_msg=['error','Lỗi xử lý xác minh.']; }
 }
 
-if($p==='logout'){ session_destroy(); redirect('home'); }
+if($p==='logout'){ remember_revoke(); $_SESSION=[]; flash(['ok','Đã đăng xuất. Hẹn gặp lại!']); redirect('home'); }
 /* ?p=updates đã gộp vào ?p=events. Redirect để link cũ không vỡ. */
 if($p==='updates'){ redirect('events'); }
 

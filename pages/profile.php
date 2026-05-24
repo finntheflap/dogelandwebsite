@@ -16,7 +16,7 @@
   <section style="padding-top:14px"><div class="wrap">
     <div class="admin-grid" style="margin-bottom:20px">
       <div class="card" style="padding:26px">
-        <div class="pskin"><img src="<?=h($CFG['skin_api'])?>/body/<?=urlencode($user)?>/right" data-skin-user="<?=h($user)?>" data-skin-size="120" onerror="skinFallback(this)" alt="skin"><div style="font-weight:800;font-size:1.3rem;margin-top:10px"><?=h($user)?></div><div class="sub2"><?= is_owner($user)?'Chủ sở hữu':($IS_ADMIN?'Quản trị viên':'Người chơi') ?></div></div>
+        <div class="pskin"><img src="<?=h($CFG['skin_api'])?>/body/<?=urlencode($user)?>/right" data-skin-user="<?=h($user)?>" data-skin-size="120" onerror="skinFallback(this)" alt="skin"><div style="font-weight:800;font-size:1.3rem;margin-top:10px"><?=h($user)?></div><div class="sub2"><?= is_supervisor($user)?'Supervisor':(function_exists('user_role')&&user_role($user)?role_label(user_role($user)):'Người chơi') ?></div></div>
         <div style="margin-top:16px">
           <div class="pstat"><span><?=h($CFG['doge_label']??'Dogecoin')?></span><b class="dogechip"><?=number_format($bal,0,',','.')?></b></div>
           <div class="pstat"><span>Đã tiêu</span><b style="color:#f7c948"><?=number_format($spent,0,',','.')?></b></div>
